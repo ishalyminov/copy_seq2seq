@@ -307,14 +307,14 @@ class CopySeq2SeqModel(object):
           np.array([decoder_targets_1hot[batch_idx][length_idx] for batch_idx in xrange(self.batch_size)],
                    dtype=np.int32))
 
-      # Create target_weights to be 0 for targets that are padding.
+ 
       batch_weight = np.ones(self.batch_size, dtype=np.float32)
       for batch_idx in xrange(self.batch_size):
         # We set weight to 0 if the corresponding target is a PAD symbol.
         # The corresponding target is decoder_input shifted by 1 forward.
         if length_idx < decoder_size - 1:
           target = decoder_inputs[batch_idx][length_idx + 1]
-        if length_idx == decoder_size - 1 or target == [data_utils.PAD_ID]:
+        if length_idx == decoder_size - 1 or target == data_utils.PAD_ID:
           batch_weight[batch_idx] = 0.0
       batch_weights.append(batch_weight)
     return batch_encoder_inputs, batch_decoder_inputs, batch_targets, batch_weights

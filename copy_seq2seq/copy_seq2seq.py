@@ -10,11 +10,46 @@ from tensorflow.python.ops import (variable_scope,
                                    nn_ops,
                                    rnn_cell_impl,
                                    math_ops)
-from tensorflow.contrib.legacy_seq2seq.python.ops.seq2seq import _extract_argmax_and_embed
 from tensorflow.python.util import nest
 import tensorflow as tf
 
+from data_utils import _START_VOCAB
+
 Linear = rnn_cell_impl._Linear
+
+
+def _extract_copy_augmented_argmax_and_embed(embedding,
+                                             encoder_inputs,
+                                             output_projection=None,
+                                             update_embedding=True):
+  """Get a loop_function that extracts the previous symbol and embeds it.
+
+  Args:
+    embedding: embedding tensor for symbols.
+    output_projection: None or a pair (W, B). If provided, each fed previous
+      output will first be multiplied by W and added B.
+    update_embedding: Boolean; if False, the gradients will not propagate
+      through the embeddings.
+
+  Returns:
+    A loop function.
+  """
+
+  def loop_function(prev, _):
+    if output_projection is not None:
+      prev = nn_ops.xw_plus_b(prev, output_projection[0], output_projection[1])
+    prev_symbol = math_ops.argmax(prev, 1)
+    if len(_START_VOCAB) <= prev_symbol:
+      copy_index = prev_symbol - len(_START_VOCAB)
+      prev_symbol = encoder_inputs[len(encoder_inputs) - copy_index - 1]
+    # Note that gradients will not propagate through the second parameter of
+    # embedding_lookup.
+    emb_prev = embedding_ops.embedding_lookup(embedding, prev_symbol)
+    if not update_embedding:
+      emb_prev = array_ops.stop_gradient(emb_prev)
+    return emb_prev
+
+  return loop_function
 
 
 def copy_seq2seq(encoder_inputs,
@@ -97,6 +132,7 @@ def copy_seq2seq(encoder_inputs,
 
     if isinstance(feed_previous, bool):
       return embedding_attention_copy_decoder(
+        encoder_inputs,
         decoder_inputs,
         encoder_state,
         attention_states,
@@ -115,6 +151,7 @@ def copy_seq2seq(encoder_inputs,
       with variable_scope.variable_scope(
           variable_scope.get_variable_scope(), reuse=reuse):
         outputs, state = embedding_attention_copy_decoder(
+          encoder_inputs,
           decoder_inputs,
           encoder_state,
           attention_states,
@@ -144,7 +181,8 @@ def copy_seq2seq(encoder_inputs,
     return outputs_and_state[:outputs_len], state
 
 
-def embedding_attention_copy_decoder(decoder_inputs,
+def embedding_attention_copy_decoder(encoder_inputs,
+                                     decoder_inputs,
                                      initial_state,
                                      attention_states,
                                      cell,
@@ -209,14 +247,15 @@ def embedding_attention_copy_decoder(decoder_inputs,
     proj_biases.get_shape().assert_is_compatible_with([num_symbols])
 
   with variable_scope.variable_scope(
-      scope or "embedding_attention_decoder", dtype=dtype) as scope:
+    scope or "embedding_attention_decoder", dtype=dtype) as scope:
 
     embedding = variable_scope.get_variable("embedding",
                                             [num_symbols, embedding_size])
     loop_function = \
-        _extract_argmax_and_embed(embedding,
-                                  output_projection,
-                                  update_embedding_for_previous) \
+        _extract_copy_augmented_argmax_and_embed(embedding,
+                                                 encoder_inputs,
+                                                 output_projection,
+                                                 update_embedding_for_previous) \
         if feed_previous else None
     emb_inp = [embedding_ops.embedding_lookup(embedding, i)
                for i in decoder_inputs]
@@ -264,8 +303,8 @@ def copy_decoder(decoder_inputs,
   if output_size is None:
     output_size = cell.output_size
 
-  with variable_scope.variable_scope(
-      scope or "copy_decoder", dtype=dtype) as scope:
+  with variable_scope.variable_scope(scope or "copy_decoder",
+                                     dtype=dtype) as scope:
     dtype = scope.dtype
 
     batch_size = array_ops.shape(decoder_inputs[0])[0]  # Needed for reshaping.
