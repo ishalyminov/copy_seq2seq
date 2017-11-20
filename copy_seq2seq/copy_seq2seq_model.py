@@ -26,9 +26,8 @@ from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 from tensorflow.python.ops import nn_ops
 
-import data_utils
-from seq2seq_model import Seq2SeqModel
-from copy_seq2seq import copy_seq2seq, copy_model_with_buckets 
+from copy_seq2seq import data_utils
+from copy_seq2seq.copy_seq2seq import copy_seq2seq, copy_model_with_buckets 
 
 
 class CopySeq2SeqModel(object):
