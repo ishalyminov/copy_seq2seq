@@ -275,38 +275,36 @@ class CopySeq2SeqModel(object):
       encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
 
       # Decoder inputs get an extra "GO" symbol, and are padded then.
-      decoder_pad_size = decoder_size - len(decoder_input) - 1
+      decoder_pad_size = decoder_size - len(decoder_input)
       decoder_inputs.append([data_utils.GO_ID] + decoder_input +
                             [data_utils.PAD_ID] * decoder_pad_size)
-      decoder_target_padded = [[data_utils.GO_ID]] + decoder_target + [[data_utils.PAD_ID]] * decoder_pad_size
+      decoder_target_padded = decoder_target + [[data_utils.PAD_ID]] * decoder_pad_size
       decoder_target_1hot = np.zeros(shape=(len(decoder_target_padded), self.target_vocab_size),
-                                    dtype=np.int32)
+                                     dtype=np.int32)
       for target_index, decoder_target_i in enumerate(decoder_target_padded):
-          for element in decoder_target_i:
-              decoder_target_1hot[target_index][element] = 1
+        for element in decoder_target_i:
+          decoder_target_1hot[target_index][element] = 1
       decoder_targets_1hot.append(decoder_target_1hot)
 
     # Now we create batch-major vectors from the data selected above.
     batch_encoder_inputs, batch_decoder_inputs, batch_targets, batch_weights = [], [], [], []
-
     # Batch encoder inputs are just re-indexed encoder_inputs.
     for length_idx in xrange(encoder_size):
       batch_encoder_inputs.append(
-          np.array([encoder_inputs[batch_idx][length_idx] for batch_idx in xrange(self.batch_size)],
-                   dtype=np.int32))
+        np.array([encoder_inputs[batch_idx][length_idx] for batch_idx in xrange(self.batch_size)],
+                 dtype=np.int32))
 
     # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
     for length_idx in xrange(decoder_size):
       batch_decoder_inputs.append(
-          np.array([decoder_inputs[batch_idx][length_idx] for batch_idx in xrange(self.batch_size)],
-                   dtype=np.int32))
+        np.array([decoder_inputs[batch_idx][length_idx] for batch_idx in xrange(self.batch_size)],
+                 dtype=np.int32))
 
     # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
     for length_idx in xrange(decoder_size):
       batch_targets.append(
-          np.array([decoder_targets_1hot[batch_idx][length_idx] for batch_idx in xrange(self.batch_size)],
-                   dtype=np.int32))
-
+        np.array([decoder_targets_1hot[batch_idx][length_idx] for batch_idx in xrange(self.batch_size)],
+                 dtype=np.int32))
  
       batch_weight = np.ones(self.batch_size, dtype=np.float32)
       for batch_idx in xrange(self.batch_size):
