@@ -274,8 +274,10 @@ class Seq2SeqModel(object):
     # Get a random batch of encoder and decoder inputs from data,
     # pad them if needed, reverse encoder inputs and add GO to decoder.
     for _ in xrange(self.batch_size):
-      encoder_input, decoder_input = random.choice(data[bucket_id])
-
+      encoder_input, decoder_input, decoder_target = random.choice(data[bucket_id])
+      if len(decoder_input) != len(decoder_target):
+        import pdb; pdb.set_trace()
+        print('!')
       # Encoder inputs are padded and then reversed.
       encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
       encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
@@ -284,7 +286,7 @@ class Seq2SeqModel(object):
       decoder_pad_size = decoder_size - len(decoder_input) - 1
       decoder_inputs.append([data_utils.GO_ID] + decoder_input +
                             [data_utils.PAD_ID] * decoder_pad_size)
-      decoder_targets.append(decoder_input + [data_utils.PAD_ID] * (1 + decoder_pad_size))
+      decoder_targets.append(decoder_target + [[data_utils.PAD_ID]] * (1 + decoder_pad_size))
 
     # Now we create batch-major vectors from the data selected above.
     batch_encoder_inputs, batch_decoder_inputs, batch_targets, batch_weights = [], [], [], []
@@ -305,7 +307,7 @@ class Seq2SeqModel(object):
                               dtype=np.int32)
       for batch_idx in xrange(self.batch_size):
         target = decoder_targets[batch_idx][length_idx]
-        batch_target[batch_idx][target] = 1
+        batch_target[batch_idx][target[-1]] = 1
       batch_targets.append(batch_target)
 
       # Create target_weights to be 0 for targets that are padding.
