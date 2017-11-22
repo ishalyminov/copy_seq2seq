@@ -39,9 +39,11 @@ def _extract_copy_augmented_argmax_and_embed(embedding,
     if output_projection is not None:
       prev = nn_ops.xw_plus_b(prev, output_projection[0], output_projection[1])
     prev_symbol = math_ops.argmax(prev, 1)
-    if len(_START_VOCAB) <= prev_symbol:
-      copy_index = prev_symbol - len(_START_VOCAB)
-      prev_symbol = encoder_inputs[len(encoder_inputs) - copy_index - 1]
+    encoder_vocabulary_size = array_ops.shape(encoder_inputs[0])[1]
+    if encoder_vocabulary_size <= prev_symbol:
+      copy_index = prev_symbol - encoder_vocabulary_size
+      input_pointer = len(encoder_inputs) - copy_index - 1
+      prev_symbol = encoder_inputs[input_pointer]
     # Note that gradients will not propagate through the second parameter of
     # embedding_lookup.
     emb_prev = embedding_ops.embedding_lookup(embedding, prev_symbol)
@@ -389,7 +391,7 @@ def copy_decoder(decoder_inputs,
 
       with variable_scope.variable_scope("AttnOutputProjection"):
         # always copying, no generating
-        inputs = attn_weights  # [cell_output] + attns + attn_weights
+        inputs = [cell_output] + attns #  + attn_weights
         output = Linear(inputs, output_size, True)(inputs)
       if loop_function is not None:
         prev = output
@@ -398,6 +400,7 @@ def copy_decoder(decoder_inputs,
   return outputs, state
 
 
+'''
 def sequence_loss_by_example(logits,
                              targets,
                              weights,
@@ -443,7 +446,7 @@ def sequence_loss_by_example(logits,
       total_size += 1e-12  # Just to avoid division by 0 for all-0 weights.
       log_perps /= total_size
   return log_perps
-
+'''
 
 def sequence_copy_loss(logits,
                        targets,
@@ -473,21 +476,22 @@ def sequence_copy_loss(logits,
   Raises:
     ValueError: If len(logits) is different from len(targets) or len(weights).
   """
+  logits_combined = []
   for i in xrange(len(logits)):
-    
     logit, target = logits[i], targets[i]
     batch_shape, vocab_shape = tf.shape(logit)[0], tf.shape(logit)[1]
     target_float = tf.cast(target, tf.float32)
     dot_product = tf.reduce_sum(tf.multiply(target_float, logit), axis=1)
-    target_mask = tf.multiply(target_float, tf.tile(tf.reshape(dot_product, [batch_shape, 1]), multiples=[1, vocab_shape]))
+    target_mask = tf.multiply(target_float,
+                              tf.tile(tf.reshape(dot_product, [batch_shape, 1]), multiples=[1, vocab_shape]))
     target_inverse_mask = tf.cast(tf.logical_not(tf.cast(target, bool)), tf.float32)
     logit_mask = tf.multiply(logit, target_inverse_mask)
-    combined_copy_logit = tf.add(target_mask, logit_mask)
-    logits[i] = combined_copy_logit
+    combined_copy_logit = tf.add(target_mask, logit_mask, name='combined_copy_logit')
+    logits_combined.append(combined_copy_logit)
 
   with ops.name_scope(name, "sequence_loss", logits + targets + weights):
     cost = math_ops.reduce_sum(
-        sequence_loss_by_example(
+        tensorflow.contrib.legacy_seq2seq.sequence_loss_by_example(
             logits,
             targets,
             weights,
@@ -565,7 +569,7 @@ def copy_model_with_buckets(encoder_inputs,
         bucket_outputs, _ = seq2seq(encoder_inputs[:bucket[0]],
                                     decoder_inputs[:bucket[1]])
         outputs.append(bucket_outputs)
-        losses.append(sequence_copy_loss(
+        losses.append(tensorflow.contrib.legacy_seq2seq.sequence_loss(  # sequence_copy_loss(
             outputs[-1],
             targets[:bucket[1]],
             weights[:bucket[1]],
