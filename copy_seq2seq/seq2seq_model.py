@@ -26,7 +26,7 @@ from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 from tensorflow.python.ops import nn_ops
 
-from copy_seq2seq import data_utils
+from copy_seq2seq import data_utils, seq2seq
 
 
 class Seq2SeqModel(object):
@@ -131,16 +131,15 @@ class Seq2SeqModel(object):
 
     # The seq2seq function: we use embedding for the input and attention.
     def seq2seq_f(encoder_inputs, decoder_inputs, do_decode):
-      return tf.contrib.legacy_seq2seq.embedding_attention_seq2seq(
-          encoder_inputs,
-          decoder_inputs,
-          cell,
-          num_encoder_symbols=source_vocab_size,
-          num_decoder_symbols=target_vocab_size,
-          embedding_size=size,
-          output_projection=output_projection,
-          feed_previous=do_decode,
-          dtype=dtype)
+      return seq2seq.embedding_attention_seq2seq(encoder_inputs,
+                                                 decoder_inputs,
+                                                 cell,
+                                                 num_encoder_symbols=source_vocab_size,
+                                                 num_decoder_symbols=target_vocab_size,
+                                                 embedding_size=size,
+                                                 output_projection=output_projection,
+                                                 feed_previous=do_decode,
+                                                 dtype=dtype)
 
     # Feeds for inputs.
     self.encoder_inputs = []
@@ -161,10 +160,13 @@ class Seq2SeqModel(object):
 
     # Training outputs and losses.
     if forward_only:
-      self.outputs, self.losses = tf.contrib.legacy_seq2seq.model_with_buckets(
-          self.encoder_inputs, self.decoder_inputs, self.decoder_targets,
-          self.target_weights, buckets, lambda x, y: seq2seq_f(x, y, True),
-          softmax_loss_function=softmax_loss_function)
+      self.outputs, self.losses = seq2seq.model_with_buckets(self.encoder_inputs,
+                                                             self.decoder_inputs,
+                                                             self.decoder_targets,
+                                                             self.target_weights,
+                                                             buckets,
+                                                             lambda x, y: seq2seq_f(x, y, True),
+                                                             softmax_loss_function=softmax_loss_function)
       # If we use output projection, we need to project outputs for decoding.
       if output_projection is not None:
         for b in xrange(len(buckets)):
@@ -173,11 +175,13 @@ class Seq2SeqModel(object):
               for output in self.outputs[b]
           ]
     else:
-      self.outputs, self.losses = tf.contrib.legacy_seq2seq.model_with_buckets(
-          self.encoder_inputs, self.decoder_inputs, self.decoder_targets,
-          self.target_weights, buckets,
-          lambda x, y: seq2seq_f(x, y, False),
-          softmax_loss_function=softmax_loss_function)
+      self.outputs, self.losses = seq2seq.model_with_buckets(self.encoder_inputs,
+                                                             self.decoder_inputs,
+                                                             self.decoder_targets,
+                                                             self.target_weights,
+                                                             buckets,
+                                                             lambda x, y: seq2seq_f(x, y, False),
+                                                             softmax_loss_function=softmax_loss_function)
 
     # Gradients and SGD update operation for training the model.
     params = tf.trainable_variables()
@@ -307,7 +311,8 @@ class Seq2SeqModel(object):
                               dtype=np.int32)
       for batch_idx in xrange(self.batch_size):
         target = decoder_targets[batch_idx][length_idx]
-        batch_target[batch_idx][target[-1]] = 1
+        for target_i in target:
+          batch_target[batch_idx][target_i] = 1
       batch_targets.append(batch_target)
 
       # Create target_weights to be 0 for targets that are padding.
