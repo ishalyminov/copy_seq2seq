@@ -308,8 +308,8 @@ class Seq2SeqModel(object):
                               dtype=np.int32)
       for batch_idx in xrange(self.batch_size):
         target = decoder_targets[batch_idx][length_idx]
-        #for target_i in target:
-        batch_target[batch_idx][target[-1]] = 1
+        for target_i in target:
+          batch_target[batch_idx][target_i] = 1
       batch_targets.append(batch_target)
 
       # Create target_weights to be 0 for targets that are padding.
