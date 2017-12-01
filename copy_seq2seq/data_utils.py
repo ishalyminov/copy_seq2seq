@@ -49,8 +49,12 @@ def basic_tokenizer(sentence):
   return [w for w in words if w]
 
 
-def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,
-                      tokenizer=None, normalize_digits=True, force=False):
+def create_vocabulary(vocabulary_path,
+                      data_path,
+                      max_vocabulary_size,
+                      tokenizer=None,
+                      normalize_digits=True,
+                      force=False):
   """Create vocabulary file (if it does not exist yet) from data file.
 
   Data file is assumed to contain one sentence per line. Each sentence is

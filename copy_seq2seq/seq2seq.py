@@ -71,7 +71,6 @@ from tensorflow.python.ops import embedding_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import rnn
-from tensorflow.python.ops import rnn_cell_impl
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.util import nest
 import tensorflow as tf
@@ -80,10 +79,7 @@ import tensorflow as tf
 Linear = core_rnn_cell._Linear  # pylint: disable=protected-access,invalid-name
 
 
-def _extract_copy_augmented_argmax_and_embed(embedding,
-                                             encoder_inputs,
-                                             output_projection=None,
-                                             update_embedding=True):
+def _extract_copy_augmented_argmax_and_embed(embedding, encoder_inputs, output_projection=None, update_embedding=True):
   """Get a loop_function that extracts the previous symbol and embeds it.
 
   Args:
@@ -116,11 +112,7 @@ def _extract_copy_augmented_argmax_and_embed(embedding,
   return loop_function
 
 
-def rnn_decoder(decoder_inputs,
-                initial_state,
-                cell,
-                loop_function=None,
-                scope=None):
+def rnn_decoder(decoder_inputs, initial_state, cell, loop_function=None, scope=None):
   """RNN decoder for the sequence-to-sequence model.
 
   Args:
@@ -163,11 +155,7 @@ def rnn_decoder(decoder_inputs,
   return outputs, state
 
 
-def basic_rnn_seq2seq(encoder_inputs,
-                      decoder_inputs,
-                      cell,
-                      dtype=dtypes.float32,
-                      scope=None):
+def basic_rnn_seq2seq(encoder_inputs, decoder_inputs, cell, dtype=dtypes.float32, scope=None):
   """Basic RNN sequence-to-sequence model.
 
   This model first runs an RNN to encode encoder_inputs into a state vector,
@@ -192,49 +180,6 @@ def basic_rnn_seq2seq(encoder_inputs,
     enc_cell = copy.deepcopy(cell)
     _, enc_state = rnn.static_rnn(enc_cell, encoder_inputs, dtype=dtype)
     return rnn_decoder(decoder_inputs, enc_state, cell)
-
-
-def tied_rnn_seq2seq(encoder_inputs,
-                     decoder_inputs,
-                     cell,
-                     loop_function=None,
-                     dtype=dtypes.float32,
-                     scope=None):
-  """RNN sequence-to-sequence model with tied encoder and decoder parameters.
-
-  This model first runs an RNN to encode encoder_inputs into a state vector, and
-  then runs decoder, initialized with the last encoder state, on decoder_inputs.
-  Encoder and decoder use the same RNN cell and share parameters.
-
-  Args:
-    encoder_inputs: A list of 2D Tensors [batch_size x input_size].
-    decoder_inputs: A list of 2D Tensors [batch_size x input_size].
-    cell: tf.nn.rnn_cell.RNNCell defining the cell function and size.
-    loop_function: If not None, this function will be applied to i-th output
-      in order to generate i+1-th input, and decoder_inputs will be ignored,
-      except for the first element ("GO" symbol), see rnn_decoder for details.
-    dtype: The dtype of the initial state of the rnn cell (default: tf.float32).
-    scope: VariableScope for the created subgraph; default: "tied_rnn_seq2seq".
-
-  Returns:
-    A tuple of the form (outputs, state), where:
-      outputs: A list of the same length as decoder_inputs of 2D Tensors with
-        shape [batch_size x output_size] containing the generated outputs.
-      state: The state of each decoder cell in each time-step. This is a list
-        with length len(decoder_inputs) -- one item for each time-step.
-        It is a 2D Tensor of shape [batch_size x cell.state_size].
-  """
-  with variable_scope.variable_scope("combined_tied_rnn_seq2seq"):
-    scope = scope or "tied_rnn_seq2seq"
-    _, enc_state = rnn.static_rnn(
-        cell, encoder_inputs, dtype=dtype, scope=scope)
-    variable_scope.get_variable_scope().reuse_variables()
-    return rnn_decoder(
-        decoder_inputs,
-        enc_state,
-        cell,
-        loop_function=loop_function,
-        scope=scope)
 
 
 def embedding_rnn_decoder(decoder_inputs,
@@ -413,7 +358,6 @@ def embedding_rnn_seq2seq(encoder_inputs,
       state = nest.pack_sequence_as(
           structure=encoder_state, flat_sequence=state_list)
     return outputs_and_state[:outputs_len], state
-
 
 
 def attention_decoder(decoder_inputs,
@@ -826,11 +770,11 @@ def sequence_copy_loss(logits,
   """
   with ops.name_scope(name, "sequence_copy_loss", logits + targets + weights):
     cost = math_ops.reduce_sum(
-        sequence_copy_loss_by_example(logits,
-                                      targets,
-                                      weights,
-                                      average_across_timesteps=average_across_timesteps,
-                                      softmax_loss_function=softmax_loss_function))
+      sequence_copy_loss_by_example(logits,
+                                    targets,
+                                    weights,
+                                    average_across_timesteps=average_across_timesteps,
+                                    softmax_loss_function=softmax_loss_function))
     if average_across_batch:
       batch_size = array_ops.shape(targets[0])[0]
       return cost / math_ops.cast(batch_size, cost.dtype)
@@ -869,27 +813,19 @@ def sequence_copy_loss_by_example(logits,
                      "%d, %d, %d." % (len(logits), len(weights), len(targets)))
   for i in xrange(len(logits)):
     logit, target = logits[i], targets[i]
-    batch_shape, vocab_shape = tf.shape(logit)[0], tf.shape(logit)[1]
+    softmaxed_logit = tf.nn.softmax(logit)
+    batch_shape, vocab_shape = tf.shape(logit)[:2]
     target_float = tf.cast(target, tf.float32)
-    dot_product = tf.reduce_sum(tf.multiply(target_float, logit), axis=1)
-    target_mask = tf.multiply(target_float, tf.tile(tf.reshape(dot_product, [batch_shape, 1]), multiples=[1, vocab_shape]))
-    target_inverse_mask = tf.cast(tf.logical_not(tf.cast(target, bool)), tf.float32)
-    logit_mask = tf.multiply(logit, target_inverse_mask)
-    combined_copy_logit = tf.add(target_mask, logit_mask)
-    logits[i] = combined_copy_logit
+    masked_logit = tf.multiply(target_float, softmaxed_logit)
+    logits[i] = masked_logit
 
-  with ops.name_scope(name, "sequence_copy_loss_by_example",
+  with ops.name_scope(name,
+                      "sequence_copy_loss_by_example",
                       logits + targets + weights):
     log_perp_list = []
     for logit, target, weight in zip(logits, targets, weights):
-      if softmax_loss_function is None:
-        # TODO(irving,ebrevdo): This reshape is needed because
-        # sequence_loss_by_example is called with scalars sometimes, which
-        # violates our general scalar strictness policy.
-        target = array_ops.reshape(target, [-1])
-        crossent = nn_ops.sparse_softmax_cross_entropy_with_logits(labels=target, logits=logit)
-      else:
-        crossent = softmax_loss_function(labels=target, logits=logit)
+      target = array_ops.reshape(target, [-1])
+      crossent = copy_cross_entropy(labels=target, logits=logit)
       log_perp_list.append(crossent * weight)
     log_perps = math_ops.add_n(log_perp_list)
     if average_across_timesteps:
@@ -979,3 +915,7 @@ def model_with_buckets(encoder_inputs,
                                  softmax_loss_function=softmax_loss_function))
   return outputs, losses
 
+
+def copy_cross_entropy(logits, targets):
+    result = tf.reduce_mean(-tf.reduce_sum(tf.log(logits), reduction_indices=[1]))
+    return result
