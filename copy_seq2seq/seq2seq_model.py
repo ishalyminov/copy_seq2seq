@@ -144,15 +144,18 @@ class Seq2SeqModel(object):
     self.decoder_inputs = []
     self.target_weights = []
     self.decoder_targets = []
+    self.decoder_target_1hots = []
     for i in xrange(buckets[-1][0]):  # Last bucket is the biggest one.
       self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
                                                 name="encoder{0}".format(i)))
     for i in xrange(buckets[-1][1] + 1):
       self.decoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
                                                 name="decoder{0}".format(i)))
-      self.decoder_targets.append(tf.placeholder(tf.int32,
-                                                 shape=[None, self.target_vocab_size],
-                                                 name="target{0}".format(i)))
+      self.decoder_targets.append(tf.placeholder(tf.int32, shape=[None],
+                                                name="target{0}".format(i)))
+      self.decoder_target_1hots.append(tf.placeholder(tf.int32,
+                                                      shape=[None, self.target_vocab_size],
+                                                      name="target_1hot{0}".format(i)))
       self.target_weights.append(tf.placeholder(dtype, shape=[None],
                                                 name="weight{0}".format(i)))
 
@@ -176,6 +179,7 @@ class Seq2SeqModel(object):
       self.outputs, self.losses = seq2seq.model_with_buckets(self.encoder_inputs,
                                                              self.decoder_inputs,
                                                              self.decoder_targets,
+                                                             self.decoder_target_1hots,
                                                              self.target_weights,
                                                              buckets,
                                                              lambda x, y: seq2seq_f(x, y, False),
@@ -197,7 +201,7 @@ class Seq2SeqModel(object):
 
     self.saver = tf.train.Saver(tf.global_variables())
 
-  def step(self, session, encoder_inputs, decoder_inputs, decoder_targets, target_weights, bucket_id, forward_only):
+  def step(self, session, encoder_inputs, decoder_inputs, decoder_targets, decoder_target_1hots, target_weights, bucket_id, forward_only):
     """Run a step of the model feeding the given inputs.
 
     Args:
@@ -236,6 +240,7 @@ class Seq2SeqModel(object):
       input_feed[self.decoder_inputs[l].name] = decoder_inputs[l]
       input_feed[self.target_weights[l].name] = target_weights[l]
       input_feed[self.decoder_targets[l].name] = decoder_targets[l]
+      input_feed[self.decoder_target_1hots[l].name] = decoder_target_1hots[l]
 
     # Output feed: depends on whether we do a backward step or not.
     if not forward_only:
@@ -284,30 +289,26 @@ class Seq2SeqModel(object):
       decoder_pad_size = decoder_size - len(decoder_input) - 1
       decoder_inputs.append([data_utils.GO_ID] + decoder_input +
                             [data_utils.PAD_ID] * decoder_pad_size)
-      decoder_targets = decoder_inputs[1:] + [data_utils.PAD_ID]
+      decoder_targets.append(decoder_inputs[-1][1:] + [data_utils.PAD_ID])
       target_1hots.append(decoder_target + [[data_utils.PAD_ID]] * (1 + decoder_pad_size))
 
     # Now we create batch-major vectors from the data selected above.
-    batch_encoder_inputs, batch_decoder_inputs, batch_decoder_targets, batch_target_1hots, batch_weights = ([],
-                                                                                                            [],
-                                                                                                            [],
-                                                                                                            [],
-                                                                                                            [])
+    batch_encoder_inputs, batch_decoder_inputs, batch_decoder_targets, batch_target_1hots, batch_weights = ([], [], [], [], [])
 
     # Batch encoder inputs are just re-indexed encoder_inputs.
     for length_idx in xrange(encoder_size):
-      batch_encoder_inputs.append(np.array([encoder_inputs[batch_idx][length_idx]
-                                            for batch_idx in xrange(self.batch_size)], dtype=np.int32))
+      batch_encoder_inputs.append(np.array([encoder_inputs[batch_idx][length_idx] for batch_idx in xrange(self.batch_size)],
+                                           dtype=np.int32))
 
     # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
     for length_idx in xrange(decoder_size):
-      batch_decoder_inputs.append(np.array([decoder_inputs[batch_idx][length_idx]
-                                            for batch_idx in xrange(self.batch_size)], dtype=np.int32))
+      batch_decoder_inputs.append(np.array([decoder_inputs[batch_idx][length_idx] for batch_idx in xrange(self.batch_size)],
+                                           dtype=np.int32))
 
       # Batch decoder targets are re-indexed decoder_targets
       for length_idx in xrange(decoder_size):
-          batch_decoder_targets.append(np.array([decoder_targets[batch_idx][length_idx]
-                                                 for batch_idx in xrange(self.batch_size)], dtype=np.int32))
+        batch_decoder_targets.append(np.array([decoder_targets[batch_idx][length_idx] for batch_idx in xrange(self.batch_size)],
+                                              dtype=np.int32))
 
       batch_target_1hot = np.zeros(shape=(self.batch_size, self.target_vocab_size), dtype=np.int32)
       for batch_idx in xrange(self.batch_size):
@@ -326,8 +327,5 @@ class Seq2SeqModel(object):
           batch_weight[batch_idx] = 0.0
       batch_weights.append(batch_weight)
 
-    return (batch_encoder_inputs,
-            batch_decoder_inputs,
-            batch_decoder_targets,
-            batch_target_1hots,
-            batch_weights)
+    return batch_encoder_inputs, batch_decoder_inputs, batch_decoder_targets, batch_target_1hots, batch_weights
+

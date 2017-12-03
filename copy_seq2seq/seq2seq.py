@@ -742,6 +742,7 @@ def embedding_attention_seq2seq(encoder_inputs,
 
 def sequence_copy_loss(logits,
                        targets,
+                       target_1hots,
                        weights,
                        average_across_timesteps=True,
                        average_across_batch=True,
@@ -772,6 +773,7 @@ def sequence_copy_loss(logits,
     cost = math_ops.reduce_sum(
       sequence_copy_loss_by_example(logits,
                                     targets,
+                                    target_1hots,
                                     weights,
                                     average_across_timesteps=average_across_timesteps,
                                     softmax_loss_function=softmax_loss_function))
@@ -784,6 +786,7 @@ def sequence_copy_loss(logits,
 
 def sequence_copy_loss_by_example(logits,
                                   targets,
+                                  target_1hots,
                                   weights,
                                   average_across_timesteps=True,
                                   softmax_loss_function=None,
@@ -812,9 +815,9 @@ def sequence_copy_loss_by_example(logits,
     raise ValueError("Lengths of logits, weights, and targets must be the same "
                      "%d, %d, %d." % (len(logits), len(weights), len(targets)))
   for i in xrange(len(logits)):
-    logit, target = logits[i], targets[i]
+    logit, target = logits[i], target_1hots[i]
     softmaxed_logit = tf.nn.softmax(logit)
-    batch_shape, vocab_shape = tf.shape(logit)[:2]
+    batch_shape, vocab_shape = tf.shape(logit)[0], tf.shape(logit)[1]
     target_float = tf.cast(target, tf.float32)
     masked_logit = tf.multiply(target_float, softmaxed_logit)
     logits[i] = masked_logit
@@ -838,6 +841,7 @@ def sequence_copy_loss_by_example(logits,
 def model_with_buckets(encoder_inputs,
                        decoder_inputs,
                        targets,
+                       target_1hots,
                        weights,
                        buckets,
                        seq2seq,
@@ -905,17 +909,20 @@ def model_with_buckets(encoder_inputs,
           losses.append(sequence_copy_loss_by_example(outputs[-1],
               # tf.contrib.legacy_seq2seq.sequence_loss_by_example(outputs[-1],
                                             targets[:bucket[1]],
+                                            target_1hots[:bucket[1]],
                                             weights[:bucket[1]],
                                             softmax_loss_function=softmax_loss_function))
         else:
           losses.append(sequence_copy_loss(outputs[-1],
               # tf.contrib.legacy_seq2seq.sequence_loss(outputs[-1],
                                  targets[:bucket[1]],
+                                 target_1hots[:bucket[1]],
                                  weights[:bucket[1]],
                                  softmax_loss_function=softmax_loss_function))
   return outputs, losses
 
 
-def copy_cross_entropy(logits, targets):
+def copy_cross_entropy(labels, logits):
     result = tf.reduce_mean(-tf.reduce_sum(tf.log(logits), reduction_indices=[1]))
     return result
+
