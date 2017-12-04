@@ -822,13 +822,11 @@ def sequence_copy_loss_by_example(logits,
     masked_logit = tf.multiply(target_float, softmaxed_logit)
     logits[i] = masked_logit
 
-  with ops.name_scope(name,
-                      "sequence_copy_loss_by_example",
-                      logits + targets + weights):
+  with ops.name_scope(name, "sequence_copy_loss_by_example", logits + targets + weights):
     log_perp_list = []
     for logit, target, weight in zip(logits, targets, weights):
       target = array_ops.reshape(target, [-1])
-      crossent = copy_cross_entropy(labels=target, logits=logit)
+      crossent = copy_binary_cross_entropy(labels=target_float, logits=logit)
       log_perp_list.append(crossent * weight)
     log_perps = math_ops.add_n(log_perp_list)
     if average_across_timesteps:
@@ -922,7 +920,7 @@ def model_with_buckets(encoder_inputs,
   return outputs, losses
 
 
-def copy_cross_entropy(labels, logits):
-    result = tf.reduce_mean(-tf.reduce_sum(tf.log(logits), reduction_indices=[1]))
+def copy_binary_cross_entropy(labels, logits):
+    result = -tf.log(tf.reduce_sum(logits * labels, reduction_indices=[1]))
     return result
 
