@@ -374,13 +374,13 @@ def prepare_data(data_dir,
                                                                                   from_vocab_path,
                                                                                   to_vocab_path,
                                                                                   tokenizer=None,
-                                                                                  force=False)
+                                                                                  force=force)
   from_dev_ids_path, to_dev_ids_path, to_dev_target_ids_path = make_dataset(from_dev_path,
                                                                             to_dev_path,
                                                                             from_vocab_path,
                                                                             to_vocab_path,
                                                                             tokenizer=None,
-                                                                            force=False)
+                                                                            force=force)
   return (from_train_ids_path,
           to_train_ids_path,
           to_train_target_ids_path,

@@ -79,7 +79,10 @@ import tensorflow as tf
 Linear = core_rnn_cell._Linear  # pylint: disable=protected-access,invalid-name
 
 
-def _extract_copy_augmented_argmax_and_embed(embedding, encoder_inputs, output_projection=None, update_embedding=True):
+def _extract_copy_augmented_argmax_and_embed(embedding,
+                                             encoder_inputs,
+                                             output_projection=None,
+                                             update_embedding=True):
   """Get a loop_function that extracts the previous symbol and embeds it.
 
   Args:
@@ -516,7 +519,7 @@ def attention_decoder(decoder_inputs,
         attns, attn_weights = attention(state)
 
       with variable_scope.variable_scope("AttnOutputProjection"):
-        inputs = [cell_output] + attns + attn_weights
+        inputs = [cell_output] + attns
         output = Linear(inputs, output_size, True)(inputs)
       if loop_function is not None:
         prev = output
@@ -597,18 +600,15 @@ def embedding_attention_decoder(decoder_inputs,
     loop_function = _extract_copy_augmented_argmax_and_embed(
         embedding, output_projection,
         update_embedding_for_previous) if feed_previous else None
-    emb_inp = [
-        embedding_ops.embedding_lookup(embedding, i) for i in decoder_inputs
-    ]
-    return attention_decoder(
-        emb_inp,
-        initial_state,
-        attention_states,
-        cell,
-        output_size=output_size,
-        num_heads=num_heads,
-        loop_function=loop_function,
-        initial_state_attention=initial_state_attention)
+    emb_inp = [embedding_ops.embedding_lookup(embedding, i) for i in decoder_inputs]
+    return attention_decoder(emb_inp,
+                             initial_state,
+                             attention_states,
+                             cell,
+                             output_size=output_size,
+                             num_heads=num_heads,
+                             loop_function=loop_function,
+                             initial_state_attention=initial_state_attention)
 
 
 def embedding_attention_seq2seq(encoder_inputs,
@@ -792,7 +792,6 @@ def sequence_copy_loss_by_example(logits,
                                   softmax_loss_function=None,
                                   name=None):
   """Weighted cross-entropy loss for a sequence of logits (per example).
-
   Args:
     logits: List of 2D Tensors of shape [batch_size x num_decoder_symbols].
     targets: List of 1D batch-sized int32 Tensors of the same length as logits.
@@ -824,8 +823,8 @@ def sequence_copy_loss_by_example(logits,
 
   with ops.name_scope(name, "sequence_copy_loss_by_example", logits + targets + weights):
     log_perp_list = []
-    for logit, target, weight in zip(logits, targets, weights):
-      target = array_ops.reshape(target, [-1])
+    for logit, target_1hot, weight in zip(logits, target_1hots, weights):
+      target_float = tf.cast(target_1hot, tf.float32)
       crossent = copy_binary_cross_entropy(labels=target_float, logits=logit)
       log_perp_list.append(crossent * weight)
     log_perps = math_ops.add_n(log_perp_list)
@@ -921,6 +920,8 @@ def model_with_buckets(encoder_inputs,
 
 
 def copy_binary_cross_entropy(labels, logits):
+    # the model's final prediction prob is the sum of all the possible ways to output the current gold token
+    # (denoted by k-hot labels)
     result = -tf.log(tf.reduce_sum(logits * labels, reduction_indices=[1]))
     return result
 
