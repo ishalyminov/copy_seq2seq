@@ -73,6 +73,7 @@ from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import rnn
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.util import nest
+from tensorflow.contrib.legacy_seq2seq.python.ops.seq2seq import _extract_argmax_and_embed
 import tensorflow as tf
 
 # TODO(ebrevdo): Remove once _linear is fully deprecated.
@@ -597,7 +598,7 @@ def embedding_attention_decoder(decoder_inputs,
 
     embedding = variable_scope.get_variable("embedding",
                                             [num_symbols, embedding_size])
-    loop_function = _extract_copy_augmented_argmax_and_embed(
+    loop_function = _extract_argmax_and_embed(
         embedding, output_projection,
         update_embedding_for_previous) if feed_previous else None
     emb_inp = [embedding_ops.embedding_lookup(embedding, i) for i in decoder_inputs]

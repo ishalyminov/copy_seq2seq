@@ -164,6 +164,7 @@ class Seq2SeqModel(object):
       self.outputs, self.losses = seq2seq.model_with_buckets(self.encoder_inputs,
                                                              self.decoder_inputs,
                                                              self.decoder_targets,
+                                                             self.decoder_target_1hots,
                                                              self.target_weights,
                                                              buckets,
                                                              lambda x, y: seq2seq_f(x, y, True),
@@ -312,7 +313,7 @@ class Seq2SeqModel(object):
       for batch_idx in xrange(self.batch_size):
         target = target_khots[batch_idx][length_idx]
         for target_i in target:
-          batch_target_khot[batch_idx][target[-1]] = 1
+          batch_target_khot[batch_idx][target_i] = 1
       batch_target_khots.append(batch_target_khot)
 
       # Create target_weights to be 0 for targets that are padding.
