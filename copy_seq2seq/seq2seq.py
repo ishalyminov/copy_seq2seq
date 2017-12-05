@@ -244,7 +244,7 @@ def embedding_rnn_decoder(decoder_inputs,
 
     embedding = variable_scope.get_variable("embedding",
                                             [num_symbols, embedding_size])
-    loop_function = _extract_copy_augmented_argmax_and_embed(embedding, output_projection,
+    loop_function = _extract_argmax_and_embed(embedding, output_projection,
                                                              update_embedding_for_previous) \
       if feed_previous \
       else None
@@ -816,10 +816,7 @@ def sequence_copy_loss_by_example(logits,
   for i in xrange(len(logits)):
     logit, target = logits[i], target_1hots[i]
     softmaxed_logit = tf.nn.softmax(logit)
-    batch_shape, vocab_shape = tf.shape(logit)[0], tf.shape(logit)[1]
-    target_float = tf.cast(target, tf.float32)
-    masked_logit = tf.multiply(target_float, softmaxed_logit)
-    logits[i] = masked_logit
+    logits[i] = softmaxed_logit
 
   with ops.name_scope(name, "sequence_copy_loss_by_example", logits + targets + weights):
     log_perp_list = []

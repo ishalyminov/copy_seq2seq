@@ -312,7 +312,7 @@ class Seq2SeqModel(object):
       for batch_idx in xrange(self.batch_size):
         target = target_khots[batch_idx][length_idx]
         for target_i in target:
-          batch_target_khot[batch_idx][target_i] = 1
+          batch_target_khot[batch_idx][target[-1]] = 1
       batch_target_khots.append(batch_target_khot)
 
       # Create target_weights to be 0 for targets that are padding.
@@ -320,7 +320,7 @@ class Seq2SeqModel(object):
       for batch_idx in xrange(self.batch_size):
         # We set weight to 0 if the corresponding target is a PAD symbol.
         # The corresponding target is decoder_input shifted by 1 forward.
-        target = target_khots[batch_idx][length_idx]
+        target = batch_decoder_targets[length_idx][batch_idx]
         if target == data_utils.PAD_ID:
           batch_weight[batch_idx] = 0.0
       batch_weights.append(batch_weight)
