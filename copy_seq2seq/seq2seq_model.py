@@ -145,6 +145,7 @@ class Seq2SeqModel(object):
     self.target_weights = []
     self.decoder_targets = []
     self.decoder_target_1hots = []
+    copy_tokens_number = buckets[-1][0]
     for i in xrange(buckets[-1][0]):  # Last bucket is the biggest one.
       self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
                                                 name="encoder{0}".format(i)))
@@ -154,7 +155,7 @@ class Seq2SeqModel(object):
       self.decoder_targets.append(tf.placeholder(tf.int32, shape=[None],
                                                 name="target{0}".format(i)))
       self.decoder_target_1hots.append(tf.placeholder(tf.int32,
-                                                      shape=[None, self.target_vocab_size],
+                                                      shape=[None, self.target_vocab_size + copy_tokens_number],
                                                       name="target_1hot{0}".format(i)))
       self.target_weights.append(tf.placeholder(dtype, shape=[None],
                                                 name="weight{0}".format(i)))
