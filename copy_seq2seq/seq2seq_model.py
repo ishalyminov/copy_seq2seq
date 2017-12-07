@@ -294,7 +294,11 @@ class Seq2SeqModel(object):
       target_khots.append(decoder_target + [[data_utils.PAD_ID]] * (1 + decoder_pad_size))
 
     # Now we create batch-major vectors from the data selected above.
-    batch_encoder_inputs, batch_decoder_inputs, batch_decoder_targets, batch_target_khots, batch_weights = ([], [], [], [], [])
+    batch_encoder_inputs, batch_decoder_inputs, batch_decoder_targets, batch_target_khots, batch_weights = ([],
+                                                                                                            [],
+                                                                                                            [],
+                                                                                                            [],
+                                                                                                            [])
 
     # Batch encoder inputs are just re-indexed encoder_inputs.
     for length_idx in xrange(encoder_size):
@@ -309,7 +313,7 @@ class Seq2SeqModel(object):
       batch_decoder_targets.append(np.array([decoder_targets[batch_idx][length_idx] for batch_idx in xrange(self.batch_size)],
                                             dtype=np.int32))
 
-      batch_target_khot = np.zeros(shape=(self.batch_size, self.target_vocab_size), dtype=np.int32)
+      batch_target_khot = np.zeros(shape=(self.batch_size, self.target_vocab_size + encoder_size), dtype=np.int32)
       for batch_idx in xrange(self.batch_size):
         target = target_khots[batch_idx][length_idx]
         for target_i in target:
@@ -326,4 +330,3 @@ class Seq2SeqModel(object):
           batch_weight[batch_idx] = 0.0
       batch_weights.append(batch_weight)
     return batch_encoder_inputs, batch_decoder_inputs, batch_decoder_targets, batch_target_khots, batch_weights
-

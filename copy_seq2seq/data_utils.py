@@ -207,9 +207,8 @@ def sentence_to_copy_ids(source_sentence,
   for w in words_target:
     copy_index_ids = []
     if w in source_word_map:
-      copy_indices = ['${}'.format(index) for index in source_word_map[w]]
-      copy_index_ids = filter(lambda x: x,
-                              [vocabulary.get(copy_index, None) for copy_index in copy_indices])
+      copy_indices = source_word_map[w]
+      copy_index_ids = map(lambda x: x + len(vocabulary), copy_indices)
     # trying to find the token in vocabulary for generating
     token_ids = copy_index_ids
     vocabulary_token_id = vocabulary.get(w, UNK_ID)
@@ -306,21 +305,21 @@ def make_dataset(from_path, to_path, from_vocab_path, to_vocab_path, tokenizer=N
                     force=force)
   # decoder inputs - decoder sequence ids from encoder vocabulary
   # (for feeding into the decoder at each time step)
-  to_ids_path = to_path + ".ids.from"
+  to_ids_path = to_path + ".ids.to"
   data_to_token_ids(to_path,
                     to_ids_path,
-                    from_vocab_path,
+                    to_vocab_path,
                     tokenizer,
                     force=force)
   # decoder targets - decoder sequences as indices in the encoder sequences
-  to_target_ids_path = to_path + ".ids.to"
+  to_target_ids_path = to_path + ".ids.copy"
   data_to_copy_ids(from_path,
                    to_path,
                    to_target_ids_path,
                    to_vocab_path,
                    tokenizer,
                    force=force)
-  return from_ids_path, to_ids_path, to_target_ids_path 
+  return from_ids_path, to_ids_path, to_target_ids_path
 
 
 def prepare_data(data_dir,
@@ -363,11 +362,12 @@ def prepare_data(data_dir,
                     from_vocabulary_size,
                     tokenizer,
                     force=force)
-  from_vocab, from_rev_vocab = initialize_vocabulary(from_vocab_path)
-  create_copy_vocabulary(from_rev_vocab,
-                    to_vocab_path,
-                    copy_tokens_number=copy_tokens_number,
+  create_vocabulary(to_vocab_path,
+                    to_train_path,
+                    to_vocabulary_size,
+                    tokenizer,
                     force=force)
+  from_vocab, from_rev_vocab = initialize_vocabulary(from_vocab_path)
 
   from_train_ids_path, to_train_ids_path, to_train_target_ids_path = make_dataset(from_train_path,
                                                                                   to_train_path,
