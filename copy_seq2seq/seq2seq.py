@@ -730,19 +730,20 @@ def embedding_attention_seq2seq(encoder_inputs,
           state_list = nest.flatten(state)
         return outputs, state_list, attention_weights
 
-    outputs, state_list, attention_weights = control_flow_ops.cond(feed_previous,
-                                                              lambda: decoder(True),
-                                                              lambda: decoder(False))
+    outputs, state_list, attention_distributions = control_flow_ops.cond(feed_previous,
+                                                                         lambda: decoder(True),
+                                                                         lambda: decoder(False))
     outputs_len = len(decoder_inputs)  # Outputs length same as decoder inputs.
     # state_list = outputs_and_state[outputs_len:]
     state = state_list[0]
     if nest.is_sequence(encoder_state):
       state = nest.pack_sequence_as(
           structure=encoder_state, flat_sequence=state_list)
-    return outputs, state, attention_weights
+    return outputs, state, attention_distributions
 
 
 def sequence_copy_loss(logits,
+                       attention_distributions,
                        targets,
                        target_1hots,
                        weights,
@@ -774,6 +775,7 @@ def sequence_copy_loss(logits,
   with ops.name_scope(name, "sequence_copy_loss", logits + targets + weights):
     cost = math_ops.reduce_sum(
       sequence_copy_loss_by_example(logits,
+                                    attention_distributions,
                                     targets,
                                     target_1hots,
                                     weights,
@@ -787,6 +789,7 @@ def sequence_copy_loss(logits,
 
 
 def sequence_copy_loss_by_example(logits,
+                                  attention_distributions,
                                   targets,
                                   target_1hots,
                                   weights,
@@ -815,14 +818,14 @@ def sequence_copy_loss_by_example(logits,
   if len(targets) != len(logits) or len(weights) != len(logits):
     raise ValueError("Lengths of logits, weights, and targets must be the same "
                      "%d, %d, %d." % (len(logits), len(weights), len(targets)))
-  for i in xrange(len(logits)):
-    logit, target = logits[i], target_1hots[i]
-    softmaxed_logit = tf.nn.softmax(logit)
-    logits[i] = softmaxed_logit
+  combined_copy_logits = []
+  for logit, attention_distribution in zip(logits, attention_distributions):
+      combined_copy_logit = tf.concat(logit, attention_distribution)
+      combined_copy_logits.append(tf.nn.softmax(combined_copy_logit))
 
   with ops.name_scope(name, "sequence_copy_loss_by_example", logits + targets + weights):
     log_perp_list = []
-    for logit, target_1hot, weight in zip(logits, target_1hots, weights):
+    for logit, target_1hot, weight in zip(combined_copy_logits, target_1hots, weights):
       target_float = tf.cast(target_1hot, tf.float32)
       crossent = copy_binary_cross_entropy(labels=target_float, logits=logit)
       log_perp_list.append(crossent * weight)
