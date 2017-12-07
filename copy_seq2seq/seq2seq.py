@@ -485,6 +485,7 @@ def attention_decoder(decoder_inputs,
       return ds, attn_weights
 
     outputs = []
+    attention_distributions = []
     prev = None
     batch_attn_size = array_ops.stack([batch_size, attn_size])
     attns = [
@@ -525,8 +526,9 @@ def attention_decoder(decoder_inputs,
       if loop_function is not None:
         prev = output
       outputs.append(output)
+      attention_distributions.append(attn_weights)
 
-  return outputs, state
+  return outputs, state, attention_distributions
 
 
 def embedding_attention_decoder(decoder_inputs,
@@ -711,34 +713,33 @@ def embedding_attention_seq2seq(encoder_inputs,
       reuse = None if feed_previous_bool else True
       with variable_scope.variable_scope(
           variable_scope.get_variable_scope(), reuse=reuse):
-        outputs, state = embedding_attention_decoder(
-            decoder_inputs,
-            encoder_state,
-            attention_states,
-            cell,
-            num_decoder_symbols,
-            embedding_size,
-            num_heads=num_heads,
-            output_size=output_size,
-            output_projection=output_projection,
-            feed_previous=feed_previous_bool,
-            update_embedding_for_previous=False,
-            initial_state_attention=initial_state_attention)
+        outputs, state, attention_weights = embedding_attention_decoder(decoder_inputs,
+                                                                        encoder_state,
+                                                                        attention_states,
+                                                                        cell,
+                                                                        num_decoder_symbols,
+                                                                        embedding_size,
+                                                                        num_heads=num_heads,
+                                                                        output_size=output_size,
+                                                                        output_projection=output_projection,
+                                                                        feed_previous=feed_previous_bool,
+                                                                        update_embedding_for_previous=False,
+                                                                        initial_state_attention=initial_state_attention)
         state_list = [state]
         if nest.is_sequence(state):
           state_list = nest.flatten(state)
-        return outputs + state_list
+        return outputs, state_list, attention_weights
 
-    outputs_and_state = control_flow_ops.cond(feed_previous,
-                                              lambda: decoder(True),
-                                              lambda: decoder(False))
+    outputs, state_list, attention_weights = control_flow_ops.cond(feed_previous,
+                                                              lambda: decoder(True),
+                                                              lambda: decoder(False))
     outputs_len = len(decoder_inputs)  # Outputs length same as decoder inputs.
-    state_list = outputs_and_state[outputs_len:]
+    # state_list = outputs_and_state[outputs_len:]
     state = state_list[0]
     if nest.is_sequence(encoder_state):
       state = nest.pack_sequence_as(
           structure=encoder_state, flat_sequence=state_list)
-    return outputs_and_state[:outputs_len], state
+    return outputs, state, attention_weights
 
 
 def sequence_copy_loss(logits,
@@ -895,13 +896,12 @@ def model_with_buckets(encoder_inputs,
   outputs = []
   with ops.name_scope(name, "model_with_buckets", all_inputs):
     for j, bucket in enumerate(buckets):
-      with variable_scope.variable_scope(
-          variable_scope.get_variable_scope(), reuse=True if j > 0 else None):
-        bucket_outputs, _ = seq2seq(encoder_inputs[:bucket[0]],
-                                    decoder_inputs[:bucket[1]])
+      with variable_scope.variable_scope(variable_scope.get_variable_scope(), reuse=True if j > 0 else None):
+        bucket_outputs, _, attention_distributions = seq2seq(encoder_inputs[:bucket[0]], decoder_inputs[:bucket[1]])
         outputs.append(bucket_outputs)
         if per_example_loss:
           losses.append(sequence_copy_loss_by_example(outputs[-1],
+                                            attention_distributions[-1],
               # tf.contrib.legacy_seq2seq.sequence_loss_by_example(outputs[-1],
                                             targets[:bucket[1]],
                                             target_1hots[:bucket[1]],
@@ -909,6 +909,7 @@ def model_with_buckets(encoder_inputs,
                                             softmax_loss_function=softmax_loss_function))
         else:
           losses.append(sequence_copy_loss(outputs[-1],
+                                attention_distributions[-1],
               # tf.contrib.legacy_seq2seq.sequence_loss(outputs[-1],
                                  targets[:bucket[1]],
                                  target_1hots[:bucket[1]],
