@@ -212,7 +212,7 @@ def sentence_to_copy_ids(source_sentence,
     # trying to find the token in vocabulary for generating
     token_ids = copy_index_ids
     vocabulary_token_id = vocabulary.get(w, UNK_ID)
-    if vocabulary_token_id != UNK_ID or not len(token_ids):
+    if False and vocabulary_token_id != UNK_ID or not len(token_ids):
         token_ids.append(vocabulary_token_id)
     result.append(token_ids)
   return result
