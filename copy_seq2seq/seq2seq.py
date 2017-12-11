@@ -101,7 +101,6 @@ def extract_copy_augmented_argmax(logit, attention_distribution, encoder_inputs)
 
 def _extract_copy_augmented_argmax_and_embed(embedding,
                                              encoder_inputs,
-                                             decoder_vocabulary_size,
                                              output_projection=None,
                                              update_embedding=True):
   """Get a loop_function that extracts the previous symbol and embeds it.
@@ -174,33 +173,6 @@ def rnn_decoder(decoder_inputs, initial_state, cell, loop_function=None, scope=N
       if loop_function is not None:
         prev = output
   return outputs, state
-
-
-def basic_rnn_seq2seq(encoder_inputs, decoder_inputs, cell, dtype=dtypes.float32, scope=None):
-  """Basic RNN sequence-to-sequence model.
-
-  This model first runs an RNN to encode encoder_inputs into a state vector,
-  then runs decoder, initialized with the last encoder state, on decoder_inputs.
-  Encoder and decoder use the same RNN cell type, but don't share parameters.
-
-  Args:
-    encoder_inputs: A list of 2D Tensors [batch_size x input_size].
-    decoder_inputs: A list of 2D Tensors [batch_size x input_size].
-    cell: tf.nn.rnn_cell.RNNCell defining the cell function and size.
-    dtype: The dtype of the initial state of the RNN cell (default: tf.float32).
-    scope: VariableScope for the created subgraph; default: "basic_rnn_seq2seq".
-
-  Returns:
-    A tuple of the form (outputs, state), where:
-      outputs: A list of the same length as decoder_inputs of 2D Tensors with
-        shape [batch_size x output_size] containing the generated outputs.
-      state: The state of each decoder cell in the final time-step.
-        It is a 2D Tensor of shape [batch_size x cell.state_size].
-  """
-  with variable_scope.variable_scope(scope or "basic_rnn_seq2seq"):
-    enc_cell = copy.deepcopy(cell)
-    _, enc_state = rnn.static_rnn(enc_cell, encoder_inputs, dtype=dtype)
-    return rnn_decoder(decoder_inputs, enc_state, cell)
 
 
 def embedding_rnn_seq2seq(encoder_inputs,
@@ -475,7 +447,7 @@ def attention_decoder(decoder_inputs,
       outputs.append(output)
       attention_distributions.append(attn_weights)
 
-  return outputs, state, attention_distributions
+  return outputs, state
 
 
 def embedding_attention_decoder(encoder_inputs,
@@ -550,11 +522,8 @@ def embedding_attention_decoder(encoder_inputs,
                                             [num_symbols, embedding_size])
     loop_function = _extract_copy_augmented_argmax_and_embed(embedding,
                                                              encoder_inputs,
-                                                             num_symbols,
                                                              output_projection,
-                                                             update_embedding_for_previous) \
-      if feed_previous \
-      else None
+                                                             update_embedding_for_previous) if feed_previous else None
     emb_inp = [embedding_ops.embedding_lookup(embedding, i) for i in decoder_inputs]
     return attention_decoder(emb_inp,
                              initial_state,
@@ -622,22 +591,18 @@ def embedding_attention_seq2seq(encoder_inputs,
       state: The state of each decoder cell at the final time-step.
         It is a 2D Tensor of shape [batch_size x cell.state_size].
   """
-  with variable_scope.variable_scope(
-      scope or "embedding_attention_seq2seq", dtype=dtype) as scope:
+  with variable_scope.variable_scope(scope or "embedding_attention_seq2seq", dtype=dtype) as scope:
     dtype = scope.dtype
     # Encoder.
     encoder_cell = copy.deepcopy(cell)
-    encoder_cell = core_rnn_cell.EmbeddingWrapper(
-        encoder_cell,
-        embedding_classes=num_encoder_symbols,
-        embedding_size=embedding_size)
-    encoder_outputs, encoder_state = rnn.static_rnn(
-        encoder_cell, encoder_inputs, dtype=dtype)
+    encoder_cell = core_rnn_cell.EmbeddingWrapper(encoder_cell,
+                                                  embedding_classes=num_encoder_symbols,
+                                                  embedding_size=embedding_size)
+    encoder_outputs, encoder_state = rnn.static_rnn(encoder_cell, encoder_inputs, dtype=dtype)
 
     # First calculate a concatenation of encoder outputs to put attention on.
-    top_states = [
-        array_ops.reshape(e, [-1, 1, cell.output_size]) for e in encoder_outputs
-    ]
+    top_states = [array_ops.reshape(e, [-1, 1, cell.output_size])
+                  for e in encoder_outputs]
     attention_states = array_ops.concat(top_states, 1)
 
     # Decoder.
@@ -666,38 +631,34 @@ def embedding_attention_seq2seq(encoder_inputs,
       reuse = None if feed_previous_bool else True
       with variable_scope.variable_scope(
           variable_scope.get_variable_scope(), reuse=reuse):
-        outputs, state, attention_weights = embedding_attention_decoder(encoder_inputs,
-                                                                        decoder_inputs,
-                                                                        encoder_state,
-                                                                        attention_states,
-                                                                        cell,
-                                                                        num_decoder_symbols,
-                                                                        embedding_size,
-                                                                        num_heads=num_heads,
-                                                                        output_size=output_size,
-                                                                        output_projection=output_projection,
-                                                                        feed_previous=feed_previous_bool,
-                                                                        update_embedding_for_previous=False,
-                                                                        initial_state_attention=initial_state_attention)
+        outputs_and_attentions, state = embedding_attention_decoder(encoder_inputs,
+                                                                    decoder_inputs,
+                                                                    encoder_state,
+                                                                    attention_states,
+                                                                    cell,
+                                                                    num_decoder_symbols,
+                                                                    embedding_size,
+                                                                    num_heads=num_heads,
+                                                                    output_size=output_size,
+                                                                    output_projection=output_projection,
+                                                                    feed_previous=feed_previous_bool,
+                                                                    update_embedding_for_previous=False,
+                                                                    initial_state_attention=initial_state_attention)
         state_list = [state]
         if nest.is_sequence(state):
           state_list = nest.flatten(state)
-        return outputs, state_list, attention_weights
+        return outputs_and_attentions, state_list
 
-    outputs, state_list, attention_distributions = control_flow_ops.cond(feed_previous,
-                                                                         lambda: decoder(True),
-                                                                         lambda: decoder(False))
-    outputs_len = len(decoder_inputs)  # Outputs length same as decoder inputs.
-    # state_list = outputs_and_state[outputs_len:]
+    outputs_and_attentions, state_list = control_flow_ops.cond(feed_previous,
+                                                               lambda: decoder(True),
+                                                               lambda: decoder(False))
     state = state_list[0]
     if nest.is_sequence(encoder_state):
-      state = nest.pack_sequence_as(
-          structure=encoder_state, flat_sequence=state_list)
-    return outputs, state, attention_distributions
+      state = nest.pack_sequence_as(structure=encoder_state, flat_sequence=state_list)
+    return outputs_and_attentions, state
 
 
-def sequence_copy_loss(logits,
-                       attention_distributions,
+def sequence_copy_loss(logits_and_attentions,
                        targets,
                        target_1hots,
                        weights,
@@ -726,10 +687,11 @@ def sequence_copy_loss(logits,
   Raises:
     ValueError: If len(logits) is different from len(targets) or len(weights).
   """
-  with ops.name_scope(name, "sequence_copy_loss", logits + targets + weights):
+  logits, attentions = logits_and_attentions
+  with ops.name_scope(name, "sequence_copy_loss", logits + attentions + targets + weights):
     cost = math_ops.reduce_sum(
       sequence_copy_loss_by_example(logits,
-                                    attention_distributions,
+                                    attentions,
                                     targets,
                                     target_1hots,
                                     weights,
@@ -854,20 +816,21 @@ def model_with_buckets(encoder_inputs,
   with ops.name_scope(name, "model_with_buckets", all_inputs):
     for j, bucket in enumerate(buckets):
       with variable_scope.variable_scope(variable_scope.get_variable_scope(), reuse=True if j > 0 else None):
-        bucket_outputs, _, attention_distributions = seq2seq(encoder_inputs[:bucket[0]],
-                                                             decoder_inputs[:bucket[1]])
-        outputs.append((bucket_outputs, attention_distributions))
+        bucket_outputs_and_attentions, _ = seq2seq(encoder_inputs[:bucket[0]],
+                                                   decoder_inputs[:bucket[1]])
+        outputs.append(bucket_outputs_and_attentions)
+        bucket_outputs, attentions = bucket_outputs_and_attentions
         if per_example_loss:
-          losses.append(sequence_copy_loss_by_example(outputs[-1],
-                                            attention_distributions,
+          losses.append(sequence_copy_loss_by_example(bucket_outputs,
+                                            attentions,
               # tf.contrib.legacy_seq2seq.sequence_loss_by_example(outputs[-1],
                                             targets[:bucket[1]],
                                             target_1hots[:bucket[1]],
                                             weights[:bucket[1]],
                                             softmax_loss_function=softmax_loss_function))
         else:
-          losses.append(sequence_copy_loss(outputs[-1],
-                                attention_distributions,
+          losses.append(sequence_copy_loss(bucket_outputs,
+                                attentions,
               # tf.contrib.legacy_seq2seq.sequence_loss(outputs[-1],
                                  targets[:bucket[1]],
                                  target_1hots[:bucket[1]],
@@ -881,4 +844,3 @@ def copy_binary_cross_entropy(labels, logits):
     # (denoted by k-hot labels)
     result = -tf.log(tf.reduce_sum(logits * labels, reduction_indices=[1]))
     return result
-
