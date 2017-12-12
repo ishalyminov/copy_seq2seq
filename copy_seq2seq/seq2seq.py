@@ -57,6 +57,7 @@ from __future__ import division
 from __future__ import print_function
 
 import copy
+from operator import itemgetter
 
 # We disable pylint because we need python3 compatibility.
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -89,12 +90,12 @@ def extract_copy_augmented_argmax(logit, attention_distribution, encoder_inputs)
                         tf.int64)
   combined_copy_logit = tf.concat([logit, attention_distribution[0]], 1)
   logit = math_ops.argmax(combined_copy_logit, 1)
-  logit_all_pointers_reversed = tf.maximum(len(encoder_inputs) - logit - 1, 0)
+  logit_all_pointers_reversed = tf.minimum(tf.maximum(logit - tf.cast(vocabulary_size, tf.int64), 0), len(encoder_inputs) - 1)
   full_copy_indices = tf.concat([tf.reshape(logit_all_pointers_reversed, (batch_size, 1)),
                                  tf.reshape(batch_index, (batch_size, 1))],
                                 1)
   logit_dereferenced = tf.gather_nd(encoder_inputs, full_copy_indices)
-  copy_condition = tf.less(tf.cast(vocabulary_size, tf.int64), logit - 1)
+  copy_condition = tf.less(tf.cast(vocabulary_size, tf.int64), logit + 1)
   result = tf.where(copy_condition, tf.cast(logit_dereferenced, tf.int64), logit)
   return result
 
@@ -444,7 +445,7 @@ def attention_decoder(decoder_inputs,
         output = Linear(inputs, output_size, True)(inputs)
       if loop_function is not None:
         prev = (output, attn_weights)
-      outputs.append(output)
+      outputs.append((output, attn_weights))
       attention_distributions.append(attn_weights)
 
   return outputs, state
@@ -658,7 +659,8 @@ def embedding_attention_seq2seq(encoder_inputs,
     return outputs_and_attentions, state
 
 
-def sequence_copy_loss(logits_and_attentions,
+def sequence_copy_loss(logits,
+                       attentions,
                        targets,
                        target_1hots,
                        weights,
@@ -687,7 +689,6 @@ def sequence_copy_loss(logits_and_attentions,
   Raises:
     ValueError: If len(logits) is different from len(targets) or len(weights).
   """
-  logits, attentions = logits_and_attentions
   with ops.name_scope(name, "sequence_copy_loss", logits + attentions + targets + weights):
     cost = math_ops.reduce_sum(
       sequence_copy_loss_by_example(logits,
@@ -705,7 +706,7 @@ def sequence_copy_loss(logits_and_attentions,
 
 
 def sequence_copy_loss_by_example(logits,
-                                  attention_distributions,
+                                  attentions,
                                   targets,
                                   target_1hots,
                                   weights,
@@ -735,9 +736,9 @@ def sequence_copy_loss_by_example(logits,
     raise ValueError("Lengths of logits, weights, and targets must be the same "
                      "%d, %d, %d." % (len(logits), len(weights), len(targets)))
   combined_copy_logits = []
-  for logit, attention_distribution in zip(logits, attention_distributions):
-      combined_copy_logit = tf.concat([logit, attention_distribution[0]], 1)
-      combined_copy_logits.append(tf.nn.softmax(combined_copy_logit))
+  for logit, attention_distribution in zip(logits, attentions):
+    combined_copy_logit = tf.concat([logit, attention_distribution[0]], 1)
+    combined_copy_logits.append(tf.nn.softmax(combined_copy_logit))
 
   with ops.name_scope(name, "sequence_copy_loss_by_example", logits + targets + weights):
     log_perp_list = []
@@ -819,7 +820,7 @@ def model_with_buckets(encoder_inputs,
         bucket_outputs_and_attentions, _ = seq2seq(encoder_inputs[:bucket[0]],
                                                    decoder_inputs[:bucket[1]])
         outputs.append(bucket_outputs_and_attentions)
-        bucket_outputs, attentions = bucket_outputs_and_attentions
+        bucket_outputs, attentions = map(itemgetter(0), bucket_outputs_and_attentions), map(itemgetter(1), bucket_outputs_and_attentions)
         if per_example_loss:
           losses.append(sequence_copy_loss_by_example(bucket_outputs,
                                             attentions,

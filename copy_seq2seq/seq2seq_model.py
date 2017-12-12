@@ -285,7 +285,7 @@ class Seq2SeqModel(object):
       encoder_input, decoder_input, decoder_target = random.choice(data[bucket_id])
       # Encoder inputs are padded and then reversed.
       encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
-      encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
+      encoder_inputs.append(encoder_input + encoder_pad)  # (list(reversed(encoder_input + encoder_pad)))
 
       # Decoder inputs get an extra "GO" symbol, and are padded then.
       decoder_pad_size = decoder_size - len(decoder_input) - 1
@@ -331,3 +331,4 @@ class Seq2SeqModel(object):
           batch_weight[batch_idx] = 0.0
       batch_weights.append(batch_weight)
     return batch_encoder_inputs, batch_decoder_inputs, batch_decoder_targets, batch_target_khots, batch_weights
+
