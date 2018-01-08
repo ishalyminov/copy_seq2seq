@@ -389,4 +389,3 @@ def prepare_data(data_dir,
           to_dev_target_ids_path,
           from_vocab_path,
           to_vocab_path)
-

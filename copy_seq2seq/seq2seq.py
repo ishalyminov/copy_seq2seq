@@ -64,7 +64,6 @@ from six.moves import xrange  # pylint: disable=redefined-builtin
 from six.moves import zip  # pylint: disable=redefined-builtin
 
 from tensorflow.contrib.rnn.python.ops import core_rnn_cell
-from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import control_flow_ops
@@ -74,7 +73,6 @@ from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import rnn
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.util import nest
-from tensorflow.contrib.legacy_seq2seq.python.ops.seq2seq import _extract_argmax_and_embed
 import tensorflow as tf
 
 # TODO(ebrevdo): Remove once _linear is fully deprecated.
@@ -90,7 +88,8 @@ def extract_copy_augmented_argmax(logit, attention_distribution, encoder_inputs)
                         tf.int64)
   combined_copy_logit = tf.concat([logit, attention_distribution[0]], 1)
   logit = math_ops.argmax(combined_copy_logit, 1)
-  logit_all_pointers_reversed = tf.minimum(tf.maximum(logit - tf.cast(vocabulary_size, tf.int64), 0), len(encoder_inputs) - 1)
+  logit_all_pointers_reversed = tf.maximum(logit - tf.cast(vocabulary_size, tf.int64), 0)
+  logit_all_pointers_reversed = tf.minimum(logit_all_pointers_reversed, len(encoder_inputs) - 1)
   full_copy_indices = tf.concat([tf.reshape(logit_all_pointers_reversed, (batch_size, 1)),
                                  tf.reshape(batch_index, (batch_size, 1))],
                                 1)
@@ -521,10 +520,12 @@ def embedding_attention_decoder(encoder_inputs,
 
     embedding = variable_scope.get_variable("embedding",
                                             [num_symbols, embedding_size])
-    loop_function = _extract_copy_augmented_argmax_and_embed(embedding,
-                                                             encoder_inputs,
-                                                             output_projection,
-                                                             update_embedding_for_previous) if feed_previous else None
+    loop_function = None
+    if feed_previous:
+        loop_function = _extract_copy_augmented_argmax_and_embed(embedding,
+                                                                 encoder_inputs,
+                                                                 output_projection,
+                                                                 update_embedding_for_previous)
     emb_inp = [embedding_ops.embedding_lookup(embedding, i) for i in decoder_inputs]
     return attention_decoder(emb_inp,
                              initial_state,
@@ -632,19 +633,20 @@ def embedding_attention_seq2seq(encoder_inputs,
       reuse = None if feed_previous_bool else True
       with variable_scope.variable_scope(
           variable_scope.get_variable_scope(), reuse=reuse):
-        outputs_and_attentions, state = embedding_attention_decoder(encoder_inputs,
-                                                                    decoder_inputs,
-                                                                    encoder_state,
-                                                                    attention_states,
-                                                                    cell,
-                                                                    num_decoder_symbols,
-                                                                    embedding_size,
-                                                                    num_heads=num_heads,
-                                                                    output_size=output_size,
-                                                                    output_projection=output_projection,
-                                                                    feed_previous=feed_previous_bool,
-                                                                    update_embedding_for_previous=False,
-                                                                    initial_state_attention=initial_state_attention)
+        outputs_and_attentions, state = \
+            embedding_attention_decoder(encoder_inputs,
+                                        decoder_inputs,
+                                        encoder_state,
+                                        attention_states,
+                                        cell,
+                                        num_decoder_symbols,
+                                        embedding_size,
+                                        num_heads=num_heads,
+                                        output_size=output_size,
+                                        output_projection=output_projection,
+                                        feed_previous=feed_previous_bool,
+                                        update_embedding_for_previous=False,
+                                        initial_state_attention=initial_state_attention)
         state_list = [state]
         if nest.is_sequence(state):
           state_list = nest.flatten(state)
@@ -816,32 +818,35 @@ def model_with_buckets(encoder_inputs,
   outputs = []
   with ops.name_scope(name, "model_with_buckets", all_inputs):
     for j, bucket in enumerate(buckets):
-      with variable_scope.variable_scope(variable_scope.get_variable_scope(), reuse=True if j > 0 else None):
+      reuse = True if 0 < j else None
+      with variable_scope.variable_scope(variable_scope.get_variable_scope(), reuse=reuse):
         bucket_outputs_and_attentions, _ = seq2seq(encoder_inputs[:bucket[0]],
                                                    decoder_inputs[:bucket[1]])
         outputs.append(bucket_outputs_and_attentions)
-        bucket_outputs, attentions = map(itemgetter(0), bucket_outputs_and_attentions), map(itemgetter(1), bucket_outputs_and_attentions)
+        bucket_outputs, attentions = (map(itemgetter(0), bucket_outputs_and_attentions),
+                                      map(itemgetter(1), bucket_outputs_and_attentions))
         if per_example_loss:
           losses.append(sequence_copy_loss_by_example(bucket_outputs,
-                                            attentions,
+                                                      attentions,
               # tf.contrib.legacy_seq2seq.sequence_loss_by_example(outputs[-1],
-                                            targets[:bucket[1]],
-                                            target_1hots[:bucket[1]],
-                                            weights[:bucket[1]],
-                                            softmax_loss_function=softmax_loss_function))
+                                                      targets[:bucket[1]],
+                                                      target_1hots[:bucket[1]],
+                                                      weights[:bucket[1]],
+                                                      softmax_loss_function=softmax_loss_function))
         else:
           losses.append(sequence_copy_loss(bucket_outputs,
-                                attentions,
+                                           attentions,
               # tf.contrib.legacy_seq2seq.sequence_loss(outputs[-1],
-                                 targets[:bucket[1]],
-                                 target_1hots[:bucket[1]],
-                                 weights[:bucket[1]],
-                                 softmax_loss_function=softmax_loss_function))
+                                           targets[:bucket[1]],
+                                           target_1hots[:bucket[1]],
+                                           weights[:bucket[1]],
+                                           softmax_loss_function=softmax_loss_function))
   return outputs, losses
 
 
 def copy_binary_cross_entropy(labels, logits):
-    # the model's final prediction prob is the sum of all the possible ways to output the current gold token
+    # the model's final prediction prob is the sum of
+    # all the possible ways to output the current gold token
     # (denoted by k-hot labels)
     result = -tf.log(tf.reduce_sum(logits * labels, reduction_indices=[1]))
     return result

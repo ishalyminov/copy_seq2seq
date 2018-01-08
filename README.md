@@ -1,2 +1,2 @@
 # copy_seq2seq
-An Implementation of Copy Seq2Seq
+An Implementation of a Copy Augmented Seq2Seq
