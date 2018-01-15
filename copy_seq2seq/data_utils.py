@@ -121,7 +121,8 @@ def create_combined_vocabulary(vocabulary_path,
   """
   if gfile.Exists(vocabulary_path) and not force:
     return
-  print("Creating vocabulary %s from data %s" % (vocabulary_path, data_path))
+  print("Creating vocabulary %s from data %s" % (vocabulary_path,
+                                                 ', '.join(data_paths)))
   vocab = {}
   counter = 0
   for filename in data_paths:
