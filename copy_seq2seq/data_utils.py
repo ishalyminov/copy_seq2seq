@@ -97,6 +97,55 @@ def create_vocabulary(vocabulary_path,
         vocab_file.write(w + b"\n")
 
 
+def create_combined_vocabulary(vocabulary_path,
+                               data_paths,
+                               max_vocabulary_size,
+                               tokenizer=None,
+                               normalize_digits=True,
+                               force=False):
+  """Create vocabulary file (if it does not exist yet) from data file.
+
+  Data file is assumed to contain one sentence per line. Each sentence is
+  tokenized and digits are normalized (if normalize_digits is set).
+  Vocabulary contains the most-frequent tokens up to max_vocabulary_size.
+  We write it to vocabulary_path in a one-token-per-line format, so that later
+  token in the first line gets id=0, second line gets id=1, and so on.
+
+  Args:
+    vocabulary_path: path where the vocabulary will be created.
+    data_path: data file that will be used to create vocabulary.
+    max_vocabulary_size: limit on the size of the created vocabulary.
+    tokenizer: a function to use to tokenize each data sentence;
+      if None, basic_tokenizer will be used.
+    normalize_digits: Boolean; if true, all digits are replaced by 0s.
+  """
+  if gfile.Exists(vocabulary_path) and not force:
+    return
+  print("Creating vocabulary %s from data %s" % (vocabulary_path, data_path))
+  vocab = {}
+  counter = 0
+  for filename in data_paths:
+    with gfile.GFile(filename, mode="rb") as f:
+      for line in f:
+        counter += 1
+        if counter % 100000 == 0:
+          print("  processing line %d" % counter)
+        line = tf.compat.as_bytes(line)
+        tokens = tokenizer(line) if tokenizer else basic_tokenizer(line)
+        for w in tokens:
+          word = _DIGIT_RE.sub(b"0", w) if normalize_digits else w
+          if word in vocab:
+            vocab[word] += 1
+          else:
+            vocab[word] = 1
+  vocab_list = _START_VOCAB + sorted(vocab, key=vocab.get, reverse=True)
+  if len(vocab_list) > max_vocabulary_size:
+    vocab_list = vocab_list[:max_vocabulary_size]
+  with gfile.GFile(vocabulary_path, mode="wb") as vocab_file:
+    for w in vocab_list:
+      vocab_file.write(w + b"\n")
+
+
 def create_copy_vocabulary(rev_vocab,
                            vocabulary_path,
                            copy_tokens_number,
@@ -331,6 +380,7 @@ def prepare_data(data_dir,
                  to_vocabulary_size,
                  tokenizer=None,
                  copy_tokens_number=0,
+                 combined_vocabulary=False,
                  force=False):
   """Preapre all necessary files that are required for the training.
 
@@ -357,18 +407,29 @@ def prepare_data(data_dir,
   to_vocab_path = os.path.join(data_dir, "vocab.to")
   from_vocab_path = os.path.join(data_dir, "vocab.from")
 
-  create_vocabulary(from_vocab_path,
-                    from_train_path,
-                    from_vocabulary_size,
-                    tokenizer,
-                    force=force)
-  create_vocabulary(to_vocab_path,
-                    to_train_path,
-                    to_vocabulary_size,
-                    tokenizer,
-                    force=force)
-  from_vocab, from_rev_vocab = initialize_vocabulary(from_vocab_path)
 
+  if combined_vocabulary:
+    create_combined_vocabulary(from_vocab_path,
+                               [from_train_path, to_train_path],
+                               from_vocabulary_size,
+                               tokenizer,
+                               force=force)
+    create_combined_vocabulary(to_vocab_path,
+                               [from_train_path, to_train_path],
+                               to_vocabulary_size,
+                               tokenizer,
+                               force=force)
+  else:
+    create_vocabulary(from_vocab_path,
+                      from_train_path,
+                      from_vocabulary_size,
+                      tokenizer,
+                      force=force)
+    create_vocabulary(to_vocab_path,
+                      to_train_path,
+                      to_vocabulary_size,
+                      tokenizer,
+                      force=force)
   from_train_ids_path, to_train_ids_path, to_train_target_ids_path = make_dataset(from_train_path,
                                                                                   to_train_path,
                                                                                   from_vocab_path,
