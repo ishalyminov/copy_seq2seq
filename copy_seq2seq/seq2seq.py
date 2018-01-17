@@ -88,14 +88,14 @@ def extract_copy_augmented_argmax(logit, attention_distribution, encoder_inputs)
                         tf.int64)
   combined_copy_logit = tf.concat([logit, attention_distribution[0]], 1)
   logit = math_ops.argmax(combined_copy_logit, 1)
-  logit_all_pointers_reversed = tf.maximum(logit - tf.cast(vocabulary_size, tf.int64), 0)
-  logit_all_pointers_reversed = tf.minimum(logit_all_pointers_reversed, len(encoder_inputs) - 1)
-  full_copy_indices = tf.concat([tf.reshape(logit_all_pointers_reversed, (batch_size, 1)),
-                                 tf.reshape(batch_index, (batch_size, 1))],
-                                1)
-  logit_dereferenced = tf.gather_nd(encoder_inputs, full_copy_indices)
-  copy_condition = tf.less(tf.cast(vocabulary_size, tf.int64), logit + 1)
-  result = tf.where(copy_condition, tf.cast(logit_dereferenced, tf.int64), logit)
+  # logit_pointers_dereferenced = tf.maximum(logit - tf.cast(vocabulary_size, tf.int64), 0)
+  # logit_pointers_dereferenced = tf.minimum(logit_pointers_dereferenced, len(encoder_inputs) - 1)
+  # full_copy_indices = tf.concat([tf.reshape(logit_pointers_dereferenced, (batch_size, 1)),
+  #                                tf.reshape(batch_index, (batch_size, 1))],
+  #                               1)
+  # logit_dereferenced = tf.gather_nd(encoder_inputs, full_copy_indices)
+  # copy_condition = tf.less(tf.cast(vocabulary_size, tf.int64), logit + 1)
+  # result = tf.where(copy_condition, tf.cast(logit_dereferenced, tf.int64), logit)
   return result
 
 

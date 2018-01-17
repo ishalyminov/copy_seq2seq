@@ -267,7 +267,7 @@ class Seq2SeqModel(object):
     else:
       return None, outputs[0], outputs[1:]  # No gradient norm, loss, outputs.
 
-  def get_batch(self, data, bucket_id):
+  def get_batch(self, data, bucket_id, start_index=0):
     """Get a random batch of data from the specified bucket, prepare for step.
 
     To feed data in step(..) it must be a list of batch-major vectors, while
@@ -288,8 +288,9 @@ class Seq2SeqModel(object):
 
     # Get a random batch of encoder and decoder inputs from data,
     # pad them if needed, reverse encoder inputs and add GO to decoder.
-    for _ in xrange(self.batch_size):
-      encoder_input, decoder_input, decoder_target = random.choice(data[bucket_id])
+    batch_size = min(self.batch_size, len(data[bucket_id]) - start_index)
+    for index in xrange(batch_size):
+      encoder_input, decoder_input, decoder_target = data[bucket_id][start_index + index]
       # Encoder inputs are padded and then reversed.
       encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
       encoder_inputs.append(encoder_input + encoder_pad)  # (list(reversed(encoder_input + encoder_pad)))
@@ -311,30 +312,30 @@ class Seq2SeqModel(object):
     # Batch encoder inputs are just re-indexed encoder_inputs.
     for length_idx in xrange(encoder_size):
       batch_enc_inputs.append(np.array([encoder_inputs[batch_idx][length_idx]
-                                        for batch_idx in xrange(self.batch_size)],
+                                        for batch_idx in xrange(batch_size)],
                                        dtype=np.int32))
 
     # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
     for length_idx in xrange(decoder_size):
       batch_dec_inputs.append(np.array([decoder_inputs[batch_idx][length_idx]
-                                        for batch_idx in xrange(self.batch_size)],
+                                        for batch_idx in xrange(batch_size)],
                                        dtype=np.int32))
 
       batch_dec_targets.append(np.array([decoder_targets[batch_idx][length_idx]
-                                         for batch_idx in xrange(self.batch_size)],
+                                         for batch_idx in xrange(batch_size)],
                                         dtype=np.int32))
 
-      batch_target_khot = np.zeros(shape=(self.batch_size, self.target_vocab_size + encoder_size),
+      batch_target_khot = np.zeros(shape=(batch_size, self.target_vocab_size + encoder_size),
                                    dtype=np.int32)
-      for batch_idx in xrange(self.batch_size):
+      for batch_idx in xrange(batch_size):
         target = target_khots[batch_idx][length_idx]
         for target_i in target:
           batch_target_khot[batch_idx][target_i] = 1
       batch_tgt_khots.append(batch_target_khot)
 
       # Create target_weights to be 0 for targets that are padding.
-      batch_weight = np.ones(self.batch_size, dtype=np.float32)
-      for batch_idx in xrange(self.batch_size):
+      batch_weight = np.ones(batch_size, dtype=np.float32)
+      for batch_idx in xrange(batch_size):
         # We set weight to 0 if the corresponding target is a PAD symbol.
         # The corresponding target is decoder_input shifted by 1 forward.
         target = batch_dec_targets[length_idx][batch_idx]
