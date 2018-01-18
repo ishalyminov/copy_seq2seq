@@ -88,15 +88,15 @@ def extract_copy_augmented_argmax(logit, attention_distribution, encoder_inputs)
                         tf.int64)
   combined_copy_logit = tf.concat([logit, attention_distribution[0]], 1)
   logit = math_ops.argmax(combined_copy_logit, 1)
-  # logit_pointers_dereferenced = tf.maximum(logit - tf.cast(vocabulary_size, tf.int64), 0)
-  # logit_pointers_dereferenced = tf.minimum(logit_pointers_dereferenced, len(encoder_inputs) - 1)
-  # full_copy_indices = tf.concat([tf.reshape(logit_pointers_dereferenced, (batch_size, 1)),
-  #                                tf.reshape(batch_index, (batch_size, 1))],
-  #                               1)
-  # logit_dereferenced = tf.gather_nd(encoder_inputs, full_copy_indices)
-  # copy_condition = tf.less(tf.cast(vocabulary_size, tf.int64), logit + 1)
-  # result = tf.where(copy_condition, tf.cast(logit_dereferenced, tf.int64), logit)
-  return result
+  logit_pointers_dereferenced = tf.maximum(logit - tf.cast(vocabulary_size, tf.int64), 0)
+  logit_pointers_dereferenced = tf.minimum(logit_pointers_dereferenced, len(encoder_inputs) - 1)
+  full_copy_indices = tf.concat([tf.reshape(logit_pointers_dereferenced, (batch_size, 1)),
+                                 tf.reshape(batch_index, (batch_size, 1))],
+                                1)
+  logit_dereferenced = tf.gather_nd(encoder_inputs, full_copy_indices)
+  copy_condition = tf.less(tf.cast(vocabulary_size, tf.int64), logit + 1)
+  result = tf.where(copy_condition, tf.cast(logit_dereferenced, tf.int64), logit)
+  return result 
 
 
 def _extract_copy_augmented_argmax_and_embed(embedding,
@@ -822,7 +822,8 @@ def model_with_buckets(encoder_inputs,
       with variable_scope.variable_scope(variable_scope.get_variable_scope(), reuse=reuse):
         bucket_outputs_and_attentions, _ = seq2seq(encoder_inputs[:bucket[0]],
                                                    decoder_inputs[:bucket[1]])
-        outputs.append(bucket_outputs_and_attentions)
+        outputs.append([extract_copy_augmented_argmax(logit, attention_dist, encoder_inputs)
+                        for logit, attention_dist in bucket_outputs_and_attentions])
         bucket_outputs, attentions = (map(itemgetter(0), bucket_outputs_and_attentions),
                                       map(itemgetter(1), bucket_outputs_and_attentions))
         if per_example_loss:
