@@ -377,6 +377,8 @@ def prepare_data(data_dir,
                  to_train_path,
                  from_dev_path,
                  to_dev_path,
+                 from_test_path,
+                 to_test_path,
                  from_vocabulary_size,
                  to_vocabulary_size,
                  tokenizer=None,
@@ -443,11 +445,13 @@ def prepare_data(data_dir,
                                                                             to_vocab_path,
                                                                             tokenizer=None,
                                                                             force=force)
-  return (from_train_ids_path,
-          to_train_ids_path,
-          to_train_target_ids_path,
-          from_dev_ids_path,
-          to_dev_ids_path,
-          to_dev_target_ids_path,
-          from_vocab_path,
-          to_vocab_path)
+  from_test_ids_path, to_test_ids_path, to_test_target_ids_path = make_dataset(from_test_path,
+                                                                               to_test_path,
+                                                                               from_vocab_path,
+                                                                               to_vocab_path,
+                                                                               tokenizer=None,
+                                                                               force=force)
+  train_data = (from_train_ids_path, to_train_ids_path, to_train_target_ids_path)
+  dev_data = (from_dev_ids_path, to_dev_ids_path, to_dev_target_ids_path)
+  test_data = (from_test_ids_path, to_test_ids_path, to_test_target_ids_path)
+  return (train_data, dev_data, test_data, from_vocab_path, to_vocab_path)
