@@ -265,7 +265,7 @@ class Seq2SeqModel(object):
     else:
       return None, outputs[0], outputs[1:]  # No gradient norm, loss, outputs.
 
-  def get_batch(self, data, bucket_id, start_index=0):
+  def get_batch(self, data, bucket_id, start_index=None):
     """Get a random batch of data from the specified bucket, prepare for step.
 
     To feed data in step(..) it must be a list of batch-major vectors, while
@@ -284,11 +284,18 @@ class Seq2SeqModel(object):
     encoder_size, decoder_size = self.buckets[bucket_id]
     encoder_inputs, decoder_inputs, decoder_targets, target_khots = [], [], [], []
 
+    if start_index is not None:
+      batch_size = min(self.batch_size, len(data[bucket_id]) - start_index)
+      sample_indices = [start_index + index for index in xrange(batch_size)]
+    else:
+      batch_size = self.batch_size
+      sample_indices = np.random.choice(range(len(data[bucket_id])),
+                                        size=batch_size,
+                                        replace=True)
     # Get a random batch of encoder and decoder inputs from data,
     # pad them if needed, reverse encoder inputs and add GO to decoder.
-    batch_size = min(self.batch_size, len(data[bucket_id]) - start_index)
-    for index in xrange(batch_size):
-      encoder_input, decoder_input, decoder_target = data[bucket_id][start_index + index]
+    for sample_index in sample_indices:
+      encoder_input, decoder_input, decoder_target = data[bucket_id][sample_index]
       # Encoder inputs are padded and then reversed.
       encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
       encoder_inputs.append(encoder_input + encoder_pad)  # (list(reversed(encoder_input + encoder_pad)))
