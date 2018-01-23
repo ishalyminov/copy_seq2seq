@@ -22,7 +22,7 @@ from __future__ import print_function
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
-from tensorflow.python.ops import nn_ops
+from tf.python.ops import nn_ops
 
 from copy_seq2seq import data_utils, seq2seq
 

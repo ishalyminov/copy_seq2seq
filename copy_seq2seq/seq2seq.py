@@ -63,40 +63,81 @@ from operator import itemgetter
 from six.moves import xrange  # pylint: disable=redefined-builtin
 from six.moves import zip  # pylint: disable=redefined-builtin
 
-from tensorflow.contrib.rnn.python.ops import core_rnn_cell
-from tensorflow.python.framework import ops
-from tensorflow.python.ops import array_ops
-from tensorflow.python.ops import control_flow_ops
-from tensorflow.python.ops import embedding_ops
-from tensorflow.python.ops import math_ops
-from tensorflow.python.ops import nn_ops
-from tensorflow.python.ops import rnn
-from tensorflow.python.ops import variable_scope
-from tensorflow.python.util import nest
 import tensorflow as tf
+from tf.contrib.rnn.python.ops import core_rnn_cell
+from tf.python.framework import ops
+from tf.python.ops import array_ops
+from tf.python.ops import control_flow_ops
+from tf.python.ops import embedding_ops
+from tf.python.ops import math_ops
+from tf.python.ops import nn_ops
+from tf.python.ops import rnn
+from tf.python.ops import variable_scope
+from tf.python.util import nest
 
 # TODO(ebrevdo): Remove once _linear is fully deprecated.
 Linear = core_rnn_cell._Linear  # pylint: disable=protected-access,invalid-name
 
 
-def extract_copy_augmented_argmax(logit, attention_distribution, encoder_inputs):
-  # copy logic
-  batch_size, vocabulary_size = array_ops.shape(logit)[0], array_ops.shape(logit)[1]
+def extract_copy_augmented_argmax(logit, attention_distribution):
+  '''
+    Just concatenating the decoder logit and attention into a copy-augmented logit.
+    Returning its argmax
+  '''
+  combined_copy_logit = tf.concat([logit, attention_distribution[0]], 1)
+  logit = math_ops.argmax(combined_copy_logit, 1)
+  return logit
+
+
+def dereference_copy_pointers(logit, encoder_inputs, vocabulary_size):
+  '''
+    Got a copy-augmented logit's argmax at the input, e.g. some values point to vocabulary entries,
+    and some to input positions.
+    Dereferencing the latter into vocabulary entries as well
+  '''
+  batch_size = array_ops.shape(logit)[0]
+
+  # just a vector [0, 1, ..., batch_size -1]
   batch_index = tf.cast(tf.linspace(0.0,
                                     tf.cast(batch_size - 1, tf.float32),
                                     batch_size),
                         tf.int64)
-  combined_copy_logit = tf.concat([logit, attention_distribution[0]], 1)
-  logit = math_ops.argmax(combined_copy_logit, 1)
+  # copy indices come after vocabulary indices in a copy-augmented logit -
+  # shifting them back into the [0, encoder_input_size) range
   logit_pointers_dereferenced = tf.maximum(logit - tf.cast(vocabulary_size, tf.int64), 0)
   logit_pointers_dereferenced = tf.minimum(logit_pointers_dereferenced, len(encoder_inputs) - 1)
+
+  # making them of a form [index in the encoder sequence, batch index]
   full_copy_indices = tf.concat([tf.reshape(logit_pointers_dereferenced, (batch_size, 1)),
                                  tf.reshape(batch_index, (batch_size, 1))],
                                 1)
+  # picking the actual decoder inputs by the 2-dimensional full copy indices
   logit_dereferenced = tf.gather_nd(encoder_inputs, full_copy_indices)
+
+  # vocabulary_size < logit + 1 <==> vocabulary_size <= logit, i.e. it's a copy index
   copy_condition = tf.less(tf.cast(vocabulary_size, tf.int64), logit + 1)
   result = tf.where(copy_condition, tf.cast(logit_dereferenced, tf.int64), logit)
-  return result 
+  return result
+
+
+def calculate_copy_augmented_output_probabilities(logits, attentions, encoder_inputs):
+    batch_size, vocabulary_size = array_ops.shape(logits[0])[0], array_ops.shape(logits[0])[1]
+    encoder_input_size = array_ops.shape(attentions[0])[1]
+
+    combined_copy_logits = []
+    for logit, attention_distribution in zip(logits, attentions):
+        combined_copy_logit = tf.concat([logit, attention_distribution[0]], 1)
+        combined_copy_logits.append(tf.nn.softmax(combined_copy_logit))
+
+    one_hot_mask = tf.one_hot(encoder_inputs, vocabulary_size)
+    attentions_flattened = tf.multiply(tf.ones((encoder_input_size, vocabulary_size)),
+                                       tf.reshape(attentions, (batch_size * encoder_input_size, 1)))
+    attentions_expanded = tf.reshape(attentions_flattened,
+                                     (batch_size, encoder_input_size, vocabulary_size))
+    attentions_masked = tf.multiply(one_hot_mask, attentions_expanded)
+    attentions_reduced = tf.reduce_sum(attentions_masked, axis=1)
+    logits_augmented = [tf.add(logit, attentions_reduced) for logit in logits]
+    return logits_augmented
 
 
 def _extract_copy_augmented_argmax_and_embed(embedding,
@@ -121,10 +162,12 @@ def _extract_copy_augmented_argmax_and_embed(embedding,
     if output_projection is not None:
       prev = nn_ops.xw_plus_b(prev, output_projection[0], output_projection[1])
 
-    prev_symbol = extract_copy_augmented_argmax(logit, attention_distribution, encoder_inputs) 
+    prev_symbol = extract_copy_augmented_argmax(logit, attention_distribution, encoder_inputs)
+    prev_symbol_dereferenced = dereference_copy_pointers(prev_symbol)
+
     # Note that gradients will not propagate through the second parameter of
     # embedding_lookup.
-    emb_prev = embedding_ops.embedding_lookup(embedding, prev_symbol)
+    emb_prev = embedding_ops.embedding_lookup(embedding, prev_symbol_dereferenced)
     if not update_embedding:
       emb_prev = array_ops.stop_gradient(emb_prev)
     return emb_prev
@@ -173,115 +216,6 @@ def rnn_decoder(decoder_inputs, initial_state, cell, loop_function=None, scope=N
       if loop_function is not None:
         prev = output
   return outputs, state
-
-
-def embedding_rnn_seq2seq(encoder_inputs,
-                          decoder_inputs,
-                          cell,
-                          num_encoder_symbols,
-                          num_decoder_symbols,
-                          embedding_size,
-                          output_projection=None,
-                          feed_previous=False,
-                          dtype=None,
-                          scope=None):
-  """Embedding RNN sequence-to-sequence model.
-
-  This model first embeds encoder_inputs by a newly created embedding (of shape
-  [num_encoder_symbols x input_size]). Then it runs an RNN to encode
-  embedded encoder_inputs into a state vector. Next, it embeds decoder_inputs
-  by another newly created embedding (of shape [num_decoder_symbols x
-  input_size]). Then it runs RNN decoder, initialized with the last
-  encoder state, on embedded decoder_inputs.
-
-  Args:
-    encoder_inputs: A list of 1D int32 Tensors of shape [batch_size].
-    decoder_inputs: A list of 1D int32 Tensors of shape [batch_size].
-    cell: tf.nn.rnn_cell.RNNCell defining the cell function and size.
-    num_encoder_symbols: Integer; number of symbols on the encoder side.
-    num_decoder_symbols: Integer; number of symbols on the decoder side.
-    embedding_size: Integer, the length of the embedding vector for each symbol.
-    output_projection: None or a pair (W, B) of output projection weights and
-      biases; W has shape [output_size x num_decoder_symbols] and B has
-      shape [num_decoder_symbols]; if provided and feed_previous=True, each
-      fed previous output will first be multiplied by W and added B.
-    feed_previous: Boolean or scalar Boolean Tensor; if True, only the first
-      of decoder_inputs will be used (the "GO" symbol), and all other decoder
-      inputs will be taken from previous outputs (as in embedding_rnn_decoder).
-      If False, decoder_inputs are used as given (the standard decoder case).
-    dtype: The dtype of the initial state for both the encoder and encoder
-      rnn cells (default: tf.float32).
-    scope: VariableScope for the created subgraph; defaults to
-      "embedding_rnn_seq2seq"
-
-  Returns:
-    A tuple of the form (outputs, state), where:
-      outputs: A list of the same length as decoder_inputs of 2D Tensors. The
-        output is of shape [batch_size x cell.output_size] when
-        output_projection is not None (and represents the dense representation
-        of predicted tokens). It is of shape [batch_size x num_decoder_symbols]
-        when output_projection is None.
-      state: The state of each decoder cell in each time-step. This is a list
-        with length len(decoder_inputs) -- one item for each time-step.
-        It is a 2D Tensor of shape [batch_size x cell.state_size].
-  """
-  with variable_scope.variable_scope(scope or "embedding_rnn_seq2seq") as scope:
-    if dtype is not None:
-      scope.set_dtype(dtype)
-    else:
-      dtype = scope.dtype
-
-    # Encoder.
-    encoder_cell = copy.deepcopy(cell)
-    encoder_cell = core_rnn_cell.EmbeddingWrapper(
-        encoder_cell,
-        embedding_classes=num_encoder_symbols,
-        embedding_size=embedding_size)
-    _, encoder_state = rnn.static_rnn(encoder_cell, encoder_inputs, dtype=dtype)
-
-    # Decoder.
-    if output_projection is None:
-      cell = core_rnn_cell.OutputProjectionWrapper(cell, num_decoder_symbols)
-
-    if isinstance(feed_previous, bool):
-      return embedding_rnn_decoder(
-          decoder_inputs,
-          encoder_state,
-          cell,
-          num_decoder_symbols,
-          embedding_size,
-          output_projection=output_projection,
-          feed_previous=feed_previous)
-
-    # If feed_previous is a Tensor, we construct 2 graphs and use cond.
-    def decoder(feed_previous_bool):
-      reuse = None if feed_previous_bool else True
-      with variable_scope.variable_scope(
-          variable_scope.get_variable_scope(), reuse=reuse):
-        outputs, state = embedding_rnn_decoder(
-            decoder_inputs,
-            encoder_state,
-            cell,
-            num_decoder_symbols,
-            embedding_size,
-            output_projection=output_projection,
-            feed_previous=feed_previous_bool,
-            update_embedding_for_previous=False)
-        state_list = [state]
-        if nest.is_sequence(state):
-          state_list = nest.flatten(state)
-        return outputs + state_list
-
-    outputs_and_state = control_flow_ops.cond(feed_previous,
-                                              lambda: decoder(True),
-                                              lambda: decoder(False))
-    outputs_len = len(decoder_inputs)  # Outputs length same as decoder inputs.
-    state_list = outputs_and_state[outputs_len:]
-    state = state_list[0]
-    if nest.is_sequence(encoder_state):
-      state = nest.pack_sequence_as(
-          structure=encoder_state, flat_sequence=state_list)
-    return outputs_and_state[:outputs_len], state
 
 
 def attention_decoder(decoder_inputs,
@@ -709,6 +643,7 @@ def sequence_copy_loss(logits,
 
 def sequence_copy_loss_by_example(logits,
                                   attentions,
+                                  encoder_inputs,
                                   targets,
                                   target_1hots,
                                   weights,
@@ -735,16 +670,16 @@ def sequence_copy_loss_by_example(logits,
     ValueError: If len(logits) is different from len(targets) or len(weights).
   """
   if len(targets) != len(logits) or len(weights) != len(logits):
-    raise ValueError("Lengths of logits, weights, and targets must be the same "
-                     "%d, %d, %d." % (len(logits), len(weights), len(targets)))
-  combined_copy_logits = []
-  for logit, attention_distribution in zip(logits, attentions):
-    combined_copy_logit = tf.concat([logit, attention_distribution[0]], 1)
-    combined_copy_logits.append(tf.nn.softmax(combined_copy_logit))
+    raise ValueError("Lengths of logits, weights, and targets must be the same %d, %d, %d." %
+                     (len(logits), len(weights), len(targets)))
+
+  copy_augmented_probs = calculate_copy_augmented_output_probabilities(logits,
+                                                                       attentions,
+                                                                       encoder_inputs)
 
   with ops.name_scope(name, "sequence_copy_loss_by_example", logits + targets + weights):
     log_perp_list = []
-    for logit, target_1hot, weight in zip(combined_copy_logits, target_1hots, weights):
+    for logit, target_1hot, weight in zip(copy_augmented_probs, target_1hots, weights):
       target_float = tf.cast(target_1hot, tf.float32)
       crossent = copy_binary_cross_entropy(labels=target_float, logits=logit)
       log_perp_list.append(crossent * weight)
@@ -804,14 +739,14 @@ def model_with_buckets(encoder_inputs,
       than the largest (last) bucket.
   """
   if len(encoder_inputs) < buckets[-1][0]:
-    raise ValueError("Length of encoder_inputs (%d) must be at least that of la"
-                     "st bucket (%d)." % (len(encoder_inputs), buckets[-1][0]))
+    raise ValueError("Length of encoder_inputs (%d) must be at least that of last bucket (%d)." %
+                     (len(encoder_inputs), buckets[-1][0]))
   if len(targets) < buckets[-1][1]:
-    raise ValueError("Length of targets (%d) must be at least that of last "
-                     "bucket (%d)." % (len(targets), buckets[-1][1]))
+    raise ValueError("Length of targets (%d) must be at least that of last bucket (%d)." %
+                     (len(targets), buckets[-1][1]))
   if len(weights) < buckets[-1][1]:
-    raise ValueError("Length of weights (%d) must be at least that of last "
-                     "bucket (%d)." % (len(weights), buckets[-1][1]))
+    raise ValueError("Length of weights (%d) must be at least that of last bucket (%d)." %
+                     (len(weights), buckets[-1][1]))
 
   all_inputs = encoder_inputs + decoder_inputs + targets + weights
   losses = []
@@ -822,14 +757,19 @@ def model_with_buckets(encoder_inputs,
       with variable_scope.variable_scope(variable_scope.get_variable_scope(), reuse=reuse):
         bucket_outputs_and_attentions, _ = seq2seq(encoder_inputs[:bucket[0]],
                                                    decoder_inputs[:bucket[1]])
-        outputs.append([extract_copy_augmented_argmax(logit, attention_dist, encoder_inputs)
-                        for logit, attention_dist in bucket_outputs_and_attentions])
+        vocab_size = array_ops.shape(bucket_outputs_and_attentions[0][0])[0]
+
+        # outputs go to back to the client
+        copy_logits = [extract_copy_augmented_argmax(logit, attention_dist)
+                       for logit, attention_dist in bucket_outputs_and_attentions]
+        outputs.append([dereference_copy_pointers(copy_logit, encoder_inputs, vocab_size)
+                        for copy_logit in copy_logits])
         bucket_outputs, attentions = (map(itemgetter(0), bucket_outputs_and_attentions),
                                       map(itemgetter(1), bucket_outputs_and_attentions))
         if per_example_loss:
           losses.append(sequence_copy_loss_by_example(bucket_outputs,
                                                       attentions,
-              # tf.contrib.legacy_seq2seq.sequence_loss_by_example(outputs[-1],
+                                                      encoder_inputs,
                                                       targets[:bucket[1]],
                                                       target_1hots[:bucket[1]],
                                                       weights[:bucket[1]],
@@ -837,7 +777,7 @@ def model_with_buckets(encoder_inputs,
         else:
           losses.append(sequence_copy_loss(bucket_outputs,
                                            attentions,
-              # tf.contrib.legacy_seq2seq.sequence_loss(outputs[-1],
+                                           encoder_inputs,
                                            targets[:bucket[1]],
                                            target_1hots[:bucket[1]],
                                            weights[:bucket[1]],

@@ -21,8 +21,8 @@ import os
 import re
 from collections import defaultdict
 
-from tensorflow.python.platform import gfile
 import tensorflow as tf
+from tf.python.platform import gfile
 
 # Special vocabulary symbols - we always put them at the start.
 _PAD = b"_PAD"
@@ -189,8 +189,7 @@ def initialize_vocabulary(vocabulary_path):
     raise ValueError("Vocabulary file %s not found.", vocabulary_path)
 
 
-def sentence_to_token_ids(sentence, vocabulary,
-                          tokenizer=None, normalize_digits=True):
+def sentence_to_token_ids(sentence, vocabulary, tokenizer=None, normalize_digits=True):
   """Convert a string to list of integers representing token-ids.
 
   For example, a sentence "I have a dog" may become tokenized into
