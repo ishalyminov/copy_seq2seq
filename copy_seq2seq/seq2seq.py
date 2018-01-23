@@ -64,16 +64,16 @@ from six.moves import xrange  # pylint: disable=redefined-builtin
 from six.moves import zip  # pylint: disable=redefined-builtin
 
 import tensorflow as tf
-from tf.contrib.rnn.python.ops import core_rnn_cell
-from tf.python.framework import ops
-from tf.python.ops import array_ops
-from tf.python.ops import control_flow_ops
-from tf.python.ops import embedding_ops
-from tf.python.ops import math_ops
-from tf.python.ops import nn_ops
-from tf.python.ops import rnn
-from tf.python.ops import variable_scope
-from tf.python.util import nest
+from tensorflow.contrib.rnn.python.ops import core_rnn_cell
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import control_flow_ops
+from tensorflow.python.ops import embedding_ops
+from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import nn_ops
+from tensorflow.python.ops import rnn
+from tensorflow.python.ops import variable_scope
+from tensorflow.python.util import nest
 
 # TODO(ebrevdo): Remove once _linear is fully deprecated.
 Linear = core_rnn_cell._Linear  # pylint: disable=protected-access,invalid-name
@@ -598,7 +598,6 @@ def embedding_attention_seq2seq(encoder_inputs,
 def sequence_copy_loss(logits,
                        attentions,
                        targets,
-                       target_1hots,
                        weights,
                        average_across_timesteps=True,
                        average_across_batch=True,
@@ -630,7 +629,6 @@ def sequence_copy_loss(logits,
       sequence_copy_loss_by_example(logits,
                                     attentions,
                                     targets,
-                                    target_1hots,
                                     weights,
                                     average_across_timesteps=average_across_timesteps,
                                     softmax_loss_function=softmax_loss_function))
@@ -645,7 +643,6 @@ def sequence_copy_loss_by_example(logits,
                                   attentions,
                                   encoder_inputs,
                                   targets,
-                                  target_1hots,
                                   weights,
                                   average_across_timesteps=True,
                                   softmax_loss_function=None,
@@ -679,9 +676,8 @@ def sequence_copy_loss_by_example(logits,
 
   with ops.name_scope(name, "sequence_copy_loss_by_example", logits + targets + weights):
     log_perp_list = []
-    for logit, target_1hot, weight in zip(copy_augmented_probs, target_1hots, weights):
-      target_float = tf.cast(target_1hot, tf.float32)
-      crossent = copy_binary_cross_entropy(labels=target_float, logits=logit)
+    for logit, target, weight in zip(copy_augmented_probs, targets, weights):
+      crossent = copy_binary_cross_entropy(labels=tf.cast(target, tf.float32), logits=logit)
       log_perp_list.append(crossent * weight)
     log_perps = math_ops.add_n(log_perp_list)
     if average_across_timesteps:
@@ -694,7 +690,6 @@ def sequence_copy_loss_by_example(logits,
 def model_with_buckets(encoder_inputs,
                        decoder_inputs,
                        targets,
-                       target_1hots,
                        weights,
                        buckets,
                        seq2seq,
@@ -771,7 +766,6 @@ def model_with_buckets(encoder_inputs,
                                                       attentions,
                                                       encoder_inputs,
                                                       targets[:bucket[1]],
-                                                      target_1hots[:bucket[1]],
                                                       weights[:bucket[1]],
                                                       softmax_loss_function=softmax_loss_function))
         else:
@@ -779,7 +773,6 @@ def model_with_buckets(encoder_inputs,
                                            attentions,
                                            encoder_inputs,
                                            targets[:bucket[1]],
-                                           target_1hots[:bucket[1]],
                                            weights[:bucket[1]],
                                            softmax_loss_function=softmax_loss_function))
   return outputs, losses

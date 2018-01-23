@@ -19,10 +19,9 @@ from __future__ import print_function
 
 import os
 import re
-from collections import defaultdict
 
 import tensorflow as tf
-from tf.python.platform import gfile
+from tensorflow.python.platform import gfile
 
 # Special vocabulary symbols - we always put them at the start.
 _PAD = b"_PAD"
@@ -147,18 +146,6 @@ def create_combined_vocabulary(vocabulary_path,
       vocab_file.write(w + b"\n")
 
 
-def create_copy_vocabulary(rev_vocab,
-                           vocabulary_path,
-                           copy_tokens_number,
-                           force=False):
-  if gfile.Exists(vocabulary_path) and not force:
-    return
-  vocab = rev_vocab + ['${}'.format(i) for i in xrange(copy_tokens_number)]
-  with gfile.GFile(vocabulary_path, mode="wb") as vocab_file:
-    for w in vocab:
-      vocab_file.write(w + b"\n")
-
-
 def initialize_vocabulary(vocabulary_path):
   """Initialize vocabulary from file.
 
@@ -217,56 +204,6 @@ def sentence_to_token_ids(sentence, vocabulary, tokenizer=None, normalize_digits
   return [vocabulary.get(_DIGIT_RE.sub(b"0", w), UNK_ID) for w in words]
 
 
-def sentence_to_copy_ids(source_sentence,
-                         target_sentence,
-                         vocabulary,
-                         tokenizer=None,
-                         normalize_digits=True):
-  """Convert a string to list of integers representing token-ids.
-
-  For example, a sentence "I have a dog" may become tokenized into
-  ["I", "have", "a", "dog"] and with vocabulary {"I": 1, "have": 2,
-  "a": 4, "dog": 7"} this function will return [1, 2, 4, 7].
-
-  Args:
-    sentence: the sentence in bytes format to convert to token-ids.
-    vocabulary: a dictionary mapping tokens to integers.
-    tokenizer: a function to use to tokenize each sentence;
-      if None, basic_tokenizer will be used.
-    normalize_digits: Boolean; if true, all digits are replaced by 0s.
-
-  Returns:
-    a list of integers, the token-ids for the sentence.
-  """
-
-  if tokenizer:
-    words_source = tokenizer(source_sentence)
-    words_target = tokenizer(target_sentence)
-  else:
-    words_source = basic_tokenizer(source_sentence)
-    words_target = basic_tokenizer(target_sentence)
-  if normalize_digits:
-    # Normalize digits by 0 before looking words up in the vocabulary
-    words_source = [_DIGIT_RE.sub(b"0", w) for w in words_source]
-    words_target = [_DIGIT_RE.sub(b"0", w) for w in words_target]
-  source_word_map = defaultdict(lambda: [])
-  for index, word in enumerate(words_source):
-    source_word_map[word].append(index)
-  result = []
-  for w in words_target:
-    copy_index_ids = []
-    if w in source_word_map:
-      copy_indices = source_word_map[w]
-      copy_index_ids = map(lambda x: x + len(vocabulary), copy_indices)
-    # trying to find the token in vocabulary for generating
-    token_ids = copy_index_ids
-    vocabulary_token_id = vocabulary.get(w, UNK_ID)
-    if vocabulary_token_id != UNK_ID or not len(token_ids):
-        token_ids.append(vocabulary_token_id)
-    result.append(token_ids)
-  return result
-
-
 def data_to_token_ids(data_path, target_path, vocabulary_path,
                       tokenizer=None, normalize_digits=True, force=False):
   """Tokenize data file and turn into token-ids using given vocabulary file.
@@ -301,48 +238,6 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
         tokens_file.write(" ".join([str(tok) for tok in token_ids]) + "\n")
 
 
-def data_to_copy_ids(source_data_path,
-                     target_data_path,
-                     target_path,
-                     vocabulary_path,
-                     tokenizer=None,
-                     normalize_digits=True,
-                     force=False):
-  """Tokenize data file and turn into token-ids using given vocabulary file.
-
-  This function loads data line-by-line from data_path, calls the above
-  sentence_to_token_ids, and saves the result to target_path. See comment
-  for sentence_to_token_ids on the details of token-ids format.
-
-  Args:
-    data_path: path to the data file in one-sentence-per-line format.
-    target_path: path where the file with token-ids will be created.
-    vocabulary_path: path to the vocabulary file.
-    tokenizer: a function to use to tokenize each sentence;
-      if None, basic_tokenizer will be used.
-    normalize_digits: Boolean; if true, all digits are replaced by 0s.
-  """
-  if gfile.Exists(target_path) and not force:
-    return
-  print("Tokenizing data in (%s, %s)" % (source_data_path, target_data_path))
-  vocab, _ = initialize_vocabulary(vocabulary_path)
-  with gfile.GFile(source_data_path, mode="rb") as source_data_file:
-    with gfile.GFile(target_data_path, mode="rb") as target_data_file:
-      with gfile.GFile(target_path, mode="w") as tokens_file:
-        counter = 0
-        for source_line, target_line in zip(source_data_file, target_data_file):
-          counter += 1
-          if counter % 1000 == 0:
-            print("  tokenizing line %d" % counter)
-          token_ids = sentence_to_copy_ids(tf.compat.as_bytes(source_line),
-                                           tf.compat.as_bytes(target_line),
-                                           vocab,
-                                           tokenizer,
-                                           normalize_digits)
-          tokens_file.write(" ".join([';'.join(map(str, tokens))
-                                      for tokens in token_ids]) + "\n")
-
-
 def make_dataset(from_path, to_path, from_vocab_path, to_vocab_path, tokenizer=None, force=False):
   # Create token ids
   # encoder inputs - just ids from the encoder vocabulary
@@ -360,15 +255,7 @@ def make_dataset(from_path, to_path, from_vocab_path, to_vocab_path, tokenizer=N
                     to_vocab_path,
                     tokenizer,
                     force=force)
-  # decoder targets - decoder sequences as indices in the encoder sequences
-  to_target_ids_path = to_path + ".ids.copy"
-  data_to_copy_ids(from_path,
-                   to_path,
-                   to_target_ids_path,
-                   to_vocab_path,
-                   tokenizer,
-                   force=force)
-  return from_ids_path, to_ids_path, to_target_ids_path
+  return from_ids_path, to_ids_path
 
 
 def prepare_data(data_dir,
@@ -381,7 +268,6 @@ def prepare_data(data_dir,
                  from_vocabulary_size,
                  to_vocabulary_size,
                  tokenizer=None,
-                 copy_tokens_number=0,
                  combined_vocabulary=False,
                  force=False):
   """Preapre all necessary files that are required for the training.
@@ -432,25 +318,25 @@ def prepare_data(data_dir,
                       to_vocabulary_size,
                       tokenizer,
                       force=force)
-  from_train_ids_path, to_train_ids_path, to_train_target_ids_path = make_dataset(from_train_path,
-                                                                                  to_train_path,
-                                                                                  from_vocab_path,
-                                                                                  to_vocab_path,
-                                                                                  tokenizer=None,
-                                                                                  force=force)
-  from_dev_ids_path, to_dev_ids_path, to_dev_target_ids_path = make_dataset(from_dev_path,
-                                                                            to_dev_path,
-                                                                            from_vocab_path,
-                                                                            to_vocab_path,
-                                                                            tokenizer=None,
-                                                                            force=force)
-  from_test_ids_path, to_test_ids_path, to_test_target_ids_path = make_dataset(from_test_path,
-                                                                               to_test_path,
-                                                                               from_vocab_path,
-                                                                               to_vocab_path,
-                                                                               tokenizer=None,
-                                                                               force=force)
-  train_data = (from_train_ids_path, to_train_ids_path, to_train_target_ids_path)
-  dev_data = (from_dev_ids_path, to_dev_ids_path, to_dev_target_ids_path)
-  test_data = (from_test_ids_path, to_test_ids_path, to_test_target_ids_path)
+  from_train_ids_path, to_train_ids_path = make_dataset(from_train_path,
+                                                        to_train_path,
+                                                        from_vocab_path,
+                                                        to_vocab_path,
+                                                        tokenizer=None,
+                                                        force=force)
+  from_dev_ids_path, to_dev_ids_path = make_dataset(from_dev_path,
+                                                    to_dev_path,
+                                                    from_vocab_path,
+                                                    to_vocab_path,
+                                                    tokenizer=None,
+                                                    force=force)
+  from_test_ids_path, to_test_ids_path = make_dataset(from_test_path,
+                                                      to_test_path,
+                                                      from_vocab_path,
+                                                      to_vocab_path,
+                                                      tokenizer=None,
+                                                      force=force)
+  train_data = (from_train_ids_path, to_train_ids_path)
+  dev_data = (from_dev_ids_path, to_dev_ids_path)
+  test_data = (from_test_ids_path, to_test_ids_path)
   return (train_data, dev_data, test_data, from_vocab_path, to_vocab_path)
