@@ -204,6 +204,18 @@ def sentence_to_token_ids(sentence, vocabulary, tokenizer=None, normalize_digits
   return [vocabulary.get(_DIGIT_RE.sub(b"0", w), UNK_ID) for w in words]
 
 
+def tokenize_data(data_path, tokenizer=None, normalize_digits=True):
+  result = []
+  with gfile.GFile(data_path, mode="rb") as data_file:
+    for line in data_file:
+      sentence = tf.compat.as_bytes(line)
+      tokens = basic_tokenizer(sentence) if tokenizer is None else tokenizer(sentence)
+      if normalize_digits:
+        tokens = [_DIGIT_RE.sub(b"0", w) for w in tokens]
+      result.append(tokens)
+  return result
+
+
 def data_to_token_ids(data_path, target_path, vocabulary_path,
                       tokenizer=None, normalize_digits=True, force=False):
   """Tokenize data file and turn into token-ids using given vocabulary file.
