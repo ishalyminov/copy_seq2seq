@@ -74,6 +74,7 @@ from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import rnn
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.util import nest
+import numpy as np
 
 # TODO(ebrevdo): Remove once _linear is fully deprecated.
 Linear = core_rnn_cell._Linear  # pylint: disable=protected-access,invalid-name
@@ -120,23 +121,33 @@ def dereference_copy_pointers(logit, encoder_inputs, vocabulary_size):
   return result
 
 
+def augment_logit_probability(in_logit_batch, in_attention_batch, in_encoder_inputs, in_inputs_mask):
+  batch_size, vocabulary_size = array_ops.shape(in_logit_batch)[0], array_ops.shape(in_logit_batch)[1]
+  encoder_input_size = array_ops.shape(in_attention_batch)[1]
+  attention_flattened = tf.multiply(tf.ones((batch_size * encoder_input_size, vocabulary_size)),
+                                    tf.reshape(in_attention_batch, (batch_size * encoder_input_size, 1)))
+  attention_expanded = tf.reshape(attention_flattened,
+                                   (batch_size, encoder_input_size, vocabulary_size))
+  attention_masked = tf.multiply(in_inputs_mask, attention_expanded)
+  attention_reduced = tf.reduce_sum(attention_masked, axis=1)
+  logit_augmented = tf.add(in_logit_batch, attention_reduced)
+  return logit_augmented
+
+
 def calculate_copy_augmented_output_probabilities(logits, attentions, encoder_inputs):
     batch_size, vocabulary_size = array_ops.shape(logits[0])[0], array_ops.shape(logits[0])[1]
     encoder_input_size = array_ops.shape(attentions[0])[1]
 
-    combined_copy_logits = []
+    softmax_logits, softmax_attentions  = [], []
     for logit, attention_distribution in zip(logits, attentions):
-        combined_copy_logit = tf.concat([logit, attention_distribution[0]], 1)
-        combined_copy_logits.append(tf.nn.softmax(combined_copy_logit))
+      combined_copy_logit = tf.concat([logit, attention_distribution], 1)
+      combined_softmax = tf.nn.softmax(combined_copy_logit)
+      softmax_logits.append(tf.slice(combined_softmax, (0, 0), (batch_size, vocabulary_size)))
+      softmax_attentions.append(tf.slice(combined_softmax, (0, vocabulary_size), (batch_size, encoder_input_size)))
 
     one_hot_mask = tf.one_hot(encoder_inputs, vocabulary_size)
-    attentions_flattened = tf.multiply(tf.ones((encoder_input_size, vocabulary_size)),
-                                       tf.reshape(attentions, (batch_size * encoder_input_size, 1)))
-    attentions_expanded = tf.reshape(attentions_flattened,
-                                     (batch_size, encoder_input_size, vocabulary_size))
-    attentions_masked = tf.multiply(one_hot_mask, attentions_expanded)
-    attentions_reduced = tf.reduce_sum(attentions_masked, axis=1)
-    logits_augmented = [tf.add(logit, attentions_reduced) for logit in logits]
+    logits_augmented = [augment_logit_probability(logit, attention, encoder_inputs, one_hot_mask)
+                        for logit, attention in zip(softmax_logits, softmax_attentions)]
     return logits_augmented
 
 
@@ -597,6 +608,7 @@ def embedding_attention_seq2seq(encoder_inputs,
 
 def sequence_copy_loss(logits,
                        attentions,
+                       encoder_inputs,
                        targets,
                        weights,
                        average_across_timesteps=True,
@@ -628,6 +640,7 @@ def sequence_copy_loss(logits,
     cost = math_ops.reduce_sum(
       sequence_copy_loss_by_example(logits,
                                     attentions,
+                                    encoder_inputs,
                                     targets,
                                     weights,
                                     average_across_timesteps=average_across_timesteps,
@@ -744,6 +757,7 @@ def model_with_buckets(encoder_inputs,
                      (len(weights), buckets[-1][1]))
 
   all_inputs = encoder_inputs + decoder_inputs + targets + weights
+  encoder_inputs_tensor = tf.transpose(tf.stack(encoder_inputs))
   losses = []
   outputs = []
   with ops.name_scope(name, "model_with_buckets", all_inputs):
@@ -760,18 +774,18 @@ def model_with_buckets(encoder_inputs,
         outputs.append([dereference_copy_pointers(copy_logit, encoder_inputs, vocab_size)
                         for copy_logit in copy_logits])
         bucket_outputs, attentions = (map(itemgetter(0), bucket_outputs_and_attentions),
-                                      map(itemgetter(1), bucket_outputs_and_attentions))
+                                      map(itemgetter(0), map(itemgetter(1), bucket_outputs_and_attentions)))
         if per_example_loss:
           losses.append(sequence_copy_loss_by_example(bucket_outputs,
                                                       attentions,
-                                                      encoder_inputs,
+                                                      encoder_inputs_tensor,
                                                       targets[:bucket[1]],
                                                       weights[:bucket[1]],
                                                       softmax_loss_function=softmax_loss_function))
         else:
           losses.append(sequence_copy_loss(bucket_outputs,
                                            attentions,
-                                           encoder_inputs,
+                                           encoder_inputs_tensor,
                                            targets[:bucket[1]],
                                            weights[:bucket[1]],
                                            softmax_loss_function=softmax_loss_function))

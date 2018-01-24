@@ -149,11 +149,9 @@ class Seq2SeqModel(object):
     for i in xrange(buckets[-1][1] + 1):
       self.decoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
                                                 name="decoder{0}".format(i)))
-      self.decoder_targets.append(tf.placeholder(tf.int32, shape=[None],
-                                                name="target{0}".format(i)))
-      self.decoder_target_1hots.append(tf.placeholder(tf.int32,
-                                                      shape=[None, self.target_vocab_size + copy_tokens_number],
-                                                      name="target_1hot{0}".format(i)))
+      self.decoder_targets.append(tf.placeholder(tf.int32,
+                                                 shape=[None, self.target_vocab_size],
+                                                 name="target{0}".format(i)))
       self.target_weights.append(tf.placeholder(dtype, shape=[None],
                                                 name="weight{0}".format(i)))
 
@@ -162,7 +160,6 @@ class Seq2SeqModel(object):
       self.outputs, self.losses = seq2seq.model_with_buckets(self.encoder_inputs,
                                                              self.decoder_inputs,
                                                              self.decoder_targets,
-                                                             self.decoder_target_1hots,
                                                              self.target_weights,
                                                              buckets,
                                                              lambda x, y: seq2seq_f(x, y, True),
@@ -178,7 +175,6 @@ class Seq2SeqModel(object):
       self.outputs, self.losses = seq2seq.model_with_buckets(self.encoder_inputs,
                                                              self.decoder_inputs,
                                                              self.decoder_targets,
-                                                             self.decoder_target_1hots,
                                                              self.target_weights,
                                                              buckets,
                                                              lambda x, y: seq2seq_f(x, y, False),
@@ -333,7 +329,7 @@ class Seq2SeqModel(object):
         # We set weight to 0 if the corresponding target is a PAD symbol.
         # The corresponding target is decoder_input shifted by 1 forward.
         target = batch_targets[length_idx][batch_idx]
-        if target == data_utils.PAD_ID:
+        if target[data_utils.PAD_ID] == 1:
           batch_weight[batch_idx] = 0.0
       batch_weights.append(batch_weight)
     return batch_enc_inputs, batch_dec_inputs, batch_targets, batch_weights
