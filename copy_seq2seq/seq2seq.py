@@ -766,13 +766,13 @@ def model_with_buckets(encoder_inputs,
       with variable_scope.variable_scope(variable_scope.get_variable_scope(), reuse=reuse):
         bucket_outputs_and_attentions, _ = seq2seq(encoder_inputs[:bucket[0]],
                                                    decoder_inputs[:bucket[1]])
-
+        bucket_outputs, attentions = (map(itemgetter(0), bucket_outputs_and_attentions),
+                                      map(itemgetter(0),
+                                          map(itemgetter(1), bucket_outputs_and_attentions)))
         # outputs go to back to the client
         copy_logits = [extract_copy_augmented_argmax(logit, attention_dist)
-                       for logit, attention_dist in bucket_outputs_and_attentions]
+                       for logit, attention_dist in zip(bucket_outputs, attentions)]
         outputs.append(copy_logits)
-        bucket_outputs, attentions = (map(itemgetter(0), bucket_outputs_and_attentions),
-                                      map(itemgetter(0), map(itemgetter(1), bucket_outputs_and_attentions)))
         if per_example_loss:
           losses.append(sequence_copy_loss_by_example(bucket_outputs,
                                                       attentions,
