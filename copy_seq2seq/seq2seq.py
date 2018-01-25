@@ -74,7 +74,6 @@ from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import rnn
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.util import nest
-import numpy as np
 
 # TODO(ebrevdo): Remove once _linear is fully deprecated.
 Linear = core_rnn_cell._Linear  # pylint: disable=protected-access,invalid-name
@@ -88,6 +87,42 @@ def extract_copy_augmented_argmax(logit, attention_distribution):
   combined_copy_logit = tf.concat([logit, attention_distribution[0]], 1)
   logit = math_ops.argmax(combined_copy_logit, 1)
   return logit
+
+
+def _extract_copy_augmented_argmax_and_embed(embedding,
+                                             encoder_inputs,
+                                             output_projection=None,
+                                             update_embedding=True):
+  """Get a loop_function that extracts the previous symbol and embeds it.
+
+  Args:
+    embedding: embedding tensor for symbols.
+    output_projection: None or a pair (W, B). If provided, each fed previous
+      output will first be multiplied by W and added B.
+    update_embedding: Boolean; if False, the gradients will not propagate
+      through the embeddings.
+
+  Returns:
+    A loop function.
+  """
+
+  def loop_function(prev, _):
+    logit, attention_distribution = prev
+    vocab_size = array_ops.shape(logit)[1]
+    if output_projection is not None:
+      prev = nn_ops.xw_plus_b(prev, output_projection[0], output_projection[1])
+
+    prev_symbol = extract_copy_augmented_argmax(logit, attention_distribution)
+    prev_symbol_dereferenced = dereference_copy_pointers(prev_symbol, encoder_inputs, vocab_size)
+
+    # Note that gradients will not propagate through the second parameter of
+    # embedding_lookup.
+    emb_prev = embedding_ops.embedding_lookup(embedding, prev_symbol_dereferenced)
+    if not update_embedding:
+      emb_prev = array_ops.stop_gradient(emb_prev)
+    return emb_prev
+
+  return loop_function
 
 
 def dereference_copy_pointers(logit, encoder_inputs, vocabulary_size):
@@ -149,41 +184,6 @@ def calculate_copy_augmented_output_probabilities(logits, attentions, encoder_in
     logits_augmented = [augment_logit_probability(logit, attention, encoder_inputs, one_hot_mask)
                         for logit, attention in zip(softmax_logits, softmax_attentions)]
     return logits_augmented
-
-
-def _extract_copy_augmented_argmax_and_embed(embedding,
-                                             encoder_inputs,
-                                             output_projection=None,
-                                             update_embedding=True):
-  """Get a loop_function that extracts the previous symbol and embeds it.
-
-  Args:
-    embedding: embedding tensor for symbols.
-    output_projection: None or a pair (W, B). If provided, each fed previous
-      output will first be multiplied by W and added B.
-    update_embedding: Boolean; if False, the gradients will not propagate
-      through the embeddings.
-
-  Returns:
-    A loop function.
-  """
-
-  def loop_function(prev, _):
-    logit, attention_distribution = prev
-    if output_projection is not None:
-      prev = nn_ops.xw_plus_b(prev, output_projection[0], output_projection[1])
-
-    prev_symbol = extract_copy_augmented_argmax(logit, attention_distribution, encoder_inputs)
-    prev_symbol_dereferenced = dereference_copy_pointers(prev_symbol)
-
-    # Note that gradients will not propagate through the second parameter of
-    # embedding_lookup.
-    emb_prev = embedding_ops.embedding_lookup(embedding, prev_symbol_dereferenced)
-    if not update_embedding:
-      emb_prev = array_ops.stop_gradient(emb_prev)
-    return emb_prev
-
-  return loop_function
 
 
 def rnn_decoder(decoder_inputs, initial_state, cell, loop_function=None, scope=None):
