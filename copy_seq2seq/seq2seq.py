@@ -112,7 +112,7 @@ def _extract_copy_augmented_argmax_and_embed(embedding,
     if output_projection is not None:
       prev = nn_ops.xw_plus_b(prev, output_projection[0], output_projection[1])
 
-    prev_symbol = extract_copy_augmented_argmax(logit, attention_distribution)
+    prev_symbol = extract_copy_augmented_argmax(logit, attention_distribution[0])
     prev_symbol_dereferenced = dereference_copy_pointers(prev_symbol, encoder_inputs, vocab_size)
 
     # Note that gradients will not propagate through the second parameter of
