@@ -690,7 +690,7 @@ def sequence_copy_loss_by_example(logits,
   with ops.name_scope(name, "sequence_copy_loss_by_example", logits + targets + weights):
     log_perp_list = []
     for logit, target, weight in zip(copy_augmented_probs, targets, weights):
-      crossent = copy_binary_cross_entropy(labels=tf.cast(target, tf.float32), logits=logit)
+      crossent = softmax_loss_function(labels=tf.cast(target, tf.float32), logits=logit)
       log_perp_list.append(crossent * weight)
     log_perps = math_ops.add_n(log_perp_list)
     if average_across_timesteps:
