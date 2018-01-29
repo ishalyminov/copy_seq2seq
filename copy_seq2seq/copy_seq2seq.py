@@ -932,6 +932,101 @@ def model_with_buckets(encoder_inputs,
   return outputs, losses
 
 
+def dual_encoder_model_with_buckets(encoder_a_inputs,
+                                    encoder_b_inputs,
+                                    decoder_inputs,
+                                    targets,
+                                    weights,
+                                    buckets,
+                                    seq2seq,
+                                    softmax_loss_function=None,
+                                    per_example_loss=False,
+                                    name=None):
+  """Create a sequence-to-sequence model with support for bucketing.
+
+  The seq2seq argument is a function that defines a sequence-to-sequence model,
+  e.g., seq2seq = lambda x, y: basic_rnn_seq2seq(
+      x, y, rnn_cell.GRUCell(24))
+
+  Args:
+    encoder_inputs: A list of Tensors to feed the encoder; first seq2seq input.
+    decoder_inputs: A list of Tensors to feed the decoder; second seq2seq input.
+    targets: A list of 1D batch-sized int32 Tensors (desired output sequence).
+    weights: List of 1D batch-sized float-Tensors to weight the targets.
+    buckets: A list of pairs of (input size, output size) for each bucket.
+    seq2seq: A sequence-to-sequence model function; it takes 2 input that
+      agree with encoder_inputs and decoder_inputs, and returns a pair
+      consisting of outputs and states (as, e.g., basic_rnn_seq2seq).
+    softmax_loss_function: Function (labels, logits) -> loss-batch
+      to be used instead of the standard softmax (the default if this is None).
+      **Note that to avoid confusion, it is required for the function to accept
+      named arguments.**
+    per_example_loss: Boolean. If set, the returned loss will be a batch-sized
+      tensor of losses for each sequence in the batch. If unset, it will be
+      a scalar with the averaged loss from all examples.
+    name: Optional name for this operation, defaults to "model_with_buckets".
+
+  Returns:
+    A tuple of the form (outputs, losses), where:
+      outputs: The outputs for each bucket. Its j'th element consists of a list
+        of 2D Tensors. The shape of output tensors can be either
+        [batch_size x output_size] or [batch_size x num_decoder_symbols]
+        depending on the seq2seq model used.
+      losses: List of scalar Tensors, representing losses for each bucket, or,
+        if per_example_loss is set, a list of 1D batch-sized float Tensors.
+
+  Raises:
+    ValueError: If length of encoder_inputs, targets, or weights is smaller
+      than the largest (last) bucket.
+  """
+  if len(encoder_a_inputs) < buckets[-1][0]:
+    raise ValueError("Length of encoder_inputs (%d) must be at least that of last bucket (%d)." %
+                     (len(encoder_a_inputs), buckets[-1][0]))
+  if len(encoder_b_inputs) < buckets[-1][0]:
+    raise ValueError("Length of encoder_inputs (%d) must be at least that of last bucket (%d)." %
+                     (len(encoder_b_inputs), buckets[-1][0]))
+  if len(targets) < buckets[-1][1]:
+    raise ValueError("Length of targets (%d) must be at least that of last bucket (%d)." %
+                     (len(targets), buckets[-1][1]))
+  if len(weights) < buckets[-1][1]:
+    raise ValueError("Length of weights (%d) must be at least that of last bucket (%d)." %
+                     (len(weights), buckets[-1][1]))
+
+  all_inputs = encoder_a_inputs + encoder_b_inputs + decoder_inputs + targets + weights
+  encoder_a_inputs_tensor = tf.transpose(tf.stack(encoder_a_inputs))
+  losses = []
+  outputs = []
+  with ops.name_scope(name, "model_with_buckets", all_inputs):
+    for j, bucket in enumerate(buckets):
+      reuse = True if 0 < j else None
+      with variable_scope.variable_scope(variable_scope.get_variable_scope(), reuse=reuse):
+        bucket_outputs_and_attentions, _ = seq2seq(encoder_a_inputs[:bucket[0]],
+                                                   encoder_b_inputs[:bucket[0]],
+                                                   decoder_inputs[:bucket[1]])
+        bucket_outputs, attentions = (map(itemgetter(0), bucket_outputs_and_attentions),
+                                      map(itemgetter(0),
+                                          map(itemgetter(1), bucket_outputs_and_attentions)))
+        # outputs go to back to the client
+        copy_logits = [extract_copy_augmented_argmax(logit, attention_dist)
+                       for logit, attention_dist in zip(bucket_outputs, attentions)]
+        outputs.append(copy_logits)
+        if per_example_loss:
+          losses.append(sequence_copy_loss_by_example(bucket_outputs,
+                                                      attentions,
+                                                      encoder_a_inputs_tensor,
+                                                      targets[:bucket[1]],
+                                                      weights[:bucket[1]],
+                                                      softmax_loss_function=softmax_loss_function))
+        else:
+          losses.append(sequence_copy_loss(bucket_outputs,
+                                           attentions,
+                                           encoder_a_inputs_tensor,
+                                           targets[:bucket[1]],
+                                           weights[:bucket[1]],
+                                           softmax_loss_function=softmax_loss_function))
+  return outputs, losses
+
+
 def copy_binary_cross_entropy(labels, logits):
     # the model's final prediction prob is the sum of
     # all the possible ways to output the current gold token

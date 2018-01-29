@@ -138,15 +138,18 @@ class DualEncoderCopySeq2SeqModel(object):
                                                dtype=dtype)
 
     # Feeds for inputs.
-    self.encoder_inputs = []
+    self.encoder_a_inputs = []
+    self.encoder_b_inputs = []
     self.decoder_inputs = []
     self.target_weights = []
     self.decoder_targets = []
     self.decoder_target_1hots = []
     copy_tokens_number = buckets[-1][0]
     for i in xrange(buckets[-1][0]):  # Last bucket is the biggest one.
-      self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
-                                                name="encoder{0}".format(i)))
+      self.encoder_a_inputs.append(tf.placeholder(tf.int32, shape=[None],
+                                                  name="encoder{0}".format(i)))
+      self.encoder_b_inputs.append(tf.placeholder(tf.int32, shape=[None],
+                                                  name="encoder{0}".format(i)))
     for i in xrange(buckets[-1][1] + 1):
       self.decoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
                                                 name="decoder{0}".format(i)))
@@ -158,13 +161,14 @@ class DualEncoderCopySeq2SeqModel(object):
 
     # Training outputs and losses.
     if forward_only:
-      self.outputs, self.losses = copy_seq2seq.model_with_buckets(self.encoder_inputs,
-                                                                  self.decoder_inputs,
-                                                                  self.decoder_targets,
-                                                                  self.target_weights,
-                                                                  buckets,
-                                                                  lambda x, y: seq2seq_f(x, y, True),
-                                                                  softmax_loss_function=softmax_loss_function)
+      self.outputs, self.losses = copy_seq2seq.dual_encoder_model_with_buckets(self.encoder_a_inputs,
+                                                                               self.encoder_b_inputs,
+                                                                               self.decoder_inputs,
+                                                                               self.decoder_targets,
+                                                                               self.target_weights,
+                                                                               buckets,
+                                                                               lambda x, y: seq2seq_f(x, y, True),
+                                                                                softmax_loss_function=softmax_loss_function)
       # If we use output projection, we need to project outputs for decoding.
       if output_projection is not None:
         for b in xrange(len(buckets)):
@@ -199,7 +203,8 @@ class DualEncoderCopySeq2SeqModel(object):
 
   def step(self,
            session,
-           encoder_inputs,
+           encoder_a_inputs,
+           encoder_b_inputs,
            decoder_inputs,
            decoder_targets,
            target_weights,
@@ -225,9 +230,12 @@ class DualEncoderCopySeq2SeqModel(object):
     """
     # Check if the sizes match.
     encoder_size, decoder_size = self.buckets[bucket_id]
-    if len(encoder_inputs) != encoder_size:
+    if len(encoder_a_inputs) != encoder_size:
       raise ValueError("Encoder length must be equal to the one in bucket,"
-                       " %d != %d." % (len(encoder_inputs), encoder_size))
+                       " %d != %d." % (len(encoder_a_inputs), encoder_size))
+    if len(encoder_b_inputs) != encoder_size:
+      raise ValueError("Encoder length must be equal to the one in bucket,"
+                       " %d != %d." % (len(encoder_b_inputs), encoder_size))
     if len(decoder_inputs) != decoder_size:
       raise ValueError("Decoder length must be equal to the one in bucket,"
                        " %d != %d." % (len(decoder_inputs), decoder_size))
@@ -238,7 +246,8 @@ class DualEncoderCopySeq2SeqModel(object):
     # Input feed: encoder inputs, decoder inputs, target_weights, as provided.
     input_feed = {}
     for l in xrange(encoder_size):
-      input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
+      input_feed[self.encoder_a_inputs[l].name] = encoder_a_inputs[l]
+      input_feed[self.encoder_b_inputs[l].name] = encoder_b_inputs[l]
     for l in xrange(decoder_size):
       input_feed[self.decoder_inputs[l].name] = decoder_inputs[l]
       input_feed[self.target_weights[l].name] = target_weights[l]
