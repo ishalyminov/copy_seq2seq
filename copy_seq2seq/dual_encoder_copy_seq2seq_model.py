@@ -125,8 +125,9 @@ class DualEncoderCopySeq2SeqModel(object):
       cell = tf.contrib.rnn.MultiRNNCell([single_cell() for _ in range(num_layers)])
 
     # The seq2seq function: we use embedding for the input and attention.
-    def seq2seq_f(encoder_inputs, decoder_inputs, do_decode):
-      return copy_seq2seq.dual_encoder_seq2seq(encoder_inputs,
+    def seq2seq_f(encoder_a_inputs, encoder_b_inputs, decoder_inputs, do_decode):
+      return copy_seq2seq.dual_encoder_seq2seq(encoder_a_inputs,
+                                               encoder_b_inputs,
                                                decoder_inputs,
                                                cell,
                                                num_encoder_a_symbols=encoder_a_vocab_size,
@@ -167,7 +168,7 @@ class DualEncoderCopySeq2SeqModel(object):
                                                                                self.decoder_targets,
                                                                                self.target_weights,
                                                                                buckets,
-                                                                               lambda x, y: seq2seq_f(x, y, True),
+                                                                               lambda x, y, z: seq2seq_f(x, y, z, True),
                                                                                 softmax_loss_function=softmax_loss_function)
       # If we use output projection, we need to project outputs for decoding.
       if output_projection is not None:
@@ -177,13 +178,14 @@ class DualEncoderCopySeq2SeqModel(object):
               for output in self.outputs[b]
           ]
     else:
-      self.outputs, self.losses = copy_seq2seq.model_with_buckets(self.encoder_inputs,
-                                                                  self.decoder_inputs,
-                                                                  self.decoder_targets,
-                                                                  self.target_weights,
-                                                                  buckets,
-                                                                  lambda x, y: seq2seq_f(x, y, False),
-                                                                  softmax_loss_function=softmax_loss_function)
+      self.outputs, self.losses = copy_seq2seq.dual_encoder_model_with_buckets(self.encoder_a_inputs,
+                                                                               self.encoder_b_inputs,
+                                                                               self.decoder_inputs,
+                                                                               self.decoder_targets,
+                                                                               self.target_weights,
+                                                                               buckets,
+                                                                               lambda x, y, z: seq2seq_f(x, y, z, False),
+                                                                               softmax_loss_function=softmax_loss_function)
 
     # Gradients and SGD update operation for training the model.
     params = tf.trainable_variables()

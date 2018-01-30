@@ -673,14 +673,16 @@ def dual_encoder_seq2seq(encoder_a_inputs,
                                                     embedding_size=embedding_size)
     encoder_a_outputs, encoder_a_state = rnn.static_rnn(encoder_a_cell,
                                                         encoder_a_inputs,
-                                                        dtype=dtype)
+                                                        dtype=dtype,
+                                                        scope="encoder_a")
     encoder_b_cell = copy.deepcopy(cell)
     encoder_b_cell = core_rnn_cell.EmbeddingWrapper(encoder_b_cell,
                                                     embedding_classes=num_encoder_b_symbols,
                                                     embedding_size=embedding_size)
     encoder_b_outputs, encoder_b_state = rnn.static_rnn(encoder_b_cell,
                                                         encoder_b_inputs,
-                                                        dtype=dtype)
+                                                        dtype=dtype,
+                                                        scope="encoder_b")
 
     # First calculate a concatenation of encoder outputs to put attention on.
     top_a_states = [array_ops.reshape(e, [-1, 1, cell.output_size])
@@ -692,7 +694,7 @@ def dual_encoder_seq2seq(encoder_a_inputs,
     attention_b_states = array_ops.concat(top_b_states, 1)
 
     attention_states = tf.add(attention_a_states, attention_b_states)
-    encoder_state = tf.add(encoder_a_outputs, encoder_b_outputs)
+    encoder_state = tf.add(encoder_a_state, encoder_b_state)
 
     # Decoder.
     output_size = None
