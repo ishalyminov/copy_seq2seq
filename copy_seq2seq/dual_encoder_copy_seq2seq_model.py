@@ -288,7 +288,7 @@ class DualEncoderCopySeq2SeqModel(object):
       the constructed batch that has the proper format to call step(...) later.
     """
     encoder_size, decoder_size = self.buckets[bucket_id]
-    encoder_inputs, decoder_inputs, decoder_targets = [], [], []
+    encoder_a_inputs, encoder_b_inputs, decoder_inputs, decoder_targets = [], [], [], []
 
     if start_index is not None:
       batch_size = min(self.batch_size, len(data[bucket_id]) - start_index)
@@ -301,10 +301,11 @@ class DualEncoderCopySeq2SeqModel(object):
     # Get a random batch of encoder and decoder inputs from data,
     # pad them if needed, reverse encoder inputs and add GO to decoder.
     for sample_index in sample_indices:
-      encoder_input, decoder_input = data[bucket_id][sample_index]
+      encoder_a_input, encoder_b_input, decoder_input = data[bucket_id][sample_index]
       # Encoder inputs are padded and then reversed.
-      encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
-      encoder_inputs.append(encoder_input + encoder_pad)
+      encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_a_input))
+      encoder_a_inputs.append(encoder_a_input + encoder_pad)
+      encoder_b_inputs.append(encoder_b_input + encoder_pad)
 
       # Decoder inputs get an extra "GO" symbol, and are padded then.
       decoder_pad_size = decoder_size - len(decoder_input) - 1
@@ -314,13 +315,20 @@ class DualEncoderCopySeq2SeqModel(object):
       decoder_targets.append(decoder_inputs[-1][1:] + [data_utils.PAD_ID])
 
     # Now we create batch-major vectors from the data selected above.
-    batch_enc_inputs, batch_dec_inputs, batch_targets, batch_weights = [], [], [], []
+    batch_enc_a_inputs, batch_enc_b_inputs, batch_dec_inputs, batch_targets, batch_weights = ([],
+                                                                                              [],
+                                                                                              [],
+                                                                                              [],
+                                                                                              [])
 
     # Batch encoder inputs are just re-indexed encoder_inputs.
     for length_idx in xrange(encoder_size):
-      batch_enc_inputs.append(np.array([encoder_inputs[batch_idx][length_idx]
-                                        for batch_idx in xrange(batch_size)],
-                                       dtype=np.int32))
+      batch_enc_a_inputs.append(np.array([encoder_a_inputs[batch_idx][length_idx]
+                                          for batch_idx in xrange(batch_size)],
+                                         dtype=np.int32))
+      batch_enc_b_inputs.append(np.array([encoder_b_inputs[batch_idx][length_idx]
+                                          for batch_idx in xrange(batch_size)],
+                                         dtype=np.int32))
 
     # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
     for length_idx in xrange(decoder_size):
@@ -344,4 +352,4 @@ class DualEncoderCopySeq2SeqModel(object):
         if target[data_utils.PAD_ID] == 1:
           batch_weight[batch_idx] = 0.0
       batch_weights.append(batch_weight)
-    return batch_enc_inputs, batch_dec_inputs, batch_targets, batch_weights
+    return batch_enc_a_inputs, batch_enc_b_inputs, batch_dec_inputs, batch_targets, batch_weights

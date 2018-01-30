@@ -19,7 +19,9 @@ from __future__ import print_function
 
 import os
 import re
+from operator import itemgetter
 
+from nltk import pos_tag
 import tensorflow as tf
 from tensorflow.python.platform import gfile
 
@@ -46,6 +48,20 @@ def basic_tokenizer(sentence):
   for space_separated_fragment in sentence.strip().split():
     words.extend(_WORD_SPLIT.split(space_separated_fragment))
   return [w for w in words if w]
+
+
+def pos_tag_data(in_src_file, in_dst_file, tokenizer=None):
+  with gfile.GFile(in_dst_file, mode="wb") as dst_out, \
+       gfile.GFile(in_src_file, mode="rb") as src_in:
+    counter = 0
+    for line in src_in:
+      counter += 1
+      if counter % 100000 == 0:
+        print("  processing line %d" % counter)
+      line = tf.compat.as_bytes(line)
+      tokens = tokenizer(line) if tokenizer else basic_tokenizer(line)
+      pos_tags = map(itemgetter(1), pos_tag(tokens))
+      dst_out.write(' '.join(pos_tags) + b"\n")
 
 
 def create_vocabulary(vocabulary_path,
@@ -253,7 +269,7 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
 def make_dataset(from_path, to_path, from_vocab_path, to_vocab_path, tokenizer=None, force=False):
   # Create token ids
   # encoder inputs - just ids from the encoder vocabulary
-  from_ids_path = from_path + ".ids.from"
+  from_ids_path = from_path + ".ids.enc"
   data_to_token_ids(from_path,
                     from_ids_path,
                     from_vocab_path,
@@ -261,7 +277,7 @@ def make_dataset(from_path, to_path, from_vocab_path, to_vocab_path, tokenizer=N
                     force=force)
   # decoder inputs - decoder sequence ids from encoder vocabulary
   # (for feeding into the decoder at each time step)
-  to_ids_path = to_path + ".ids.to"
+  to_ids_path = to_path + ".ids.dec"
   data_to_token_ids(to_path,
                     to_ids_path,
                     to_vocab_path,
@@ -304,8 +320,8 @@ def prepare_data(data_dir,
         (5) path to the "from language" vocabulary file,
         (6) path to the "to language" vocabulary file.
     """
-  to_vocab_path = os.path.join(data_dir, "vocab.to")
-  from_vocab_path = os.path.join(data_dir, "vocab.from")
+  to_vocab_path = os.path.join(data_dir, "vocab.enc")
+  from_vocab_path = os.path.join(data_dir, "vocab.dec")
 
 
   if combined_vocabulary:
@@ -352,3 +368,116 @@ def prepare_data(data_dir,
   dev_data = (from_dev_ids_path, to_dev_ids_path)
   test_data = (from_test_ids_path, to_test_ids_path)
   return (train_data, dev_data, test_data, from_vocab_path, to_vocab_path)
+
+
+def prepare_dual_encoder_data(data_dir,
+                              from_train_path,
+                              to_train_path,
+                              from_dev_path,
+                              to_dev_path,
+                              from_test_path,
+                              to_test_path,
+                              from_vocabulary_size,
+                              to_vocabulary_size,
+                              tokenizer=None,
+                              combined_vocabulary=False,
+                              force=False):
+  """Prepare all necessary files that are required for the training.
+
+    Args:
+      data_dir: directory in which the data sets will be stored.
+      from_train_path: path to the file that includes "from" training samples.
+      to_train_path: path to the file that includes "to" training samples.
+      from_dev_path: path to the file that includes "from" dev samples.
+      to_dev_path: path to the file that includes "to" dev samples.
+      from_vocabulary_size: size of the "from language" vocabulary to create and use.
+      to_vocabulary_size: size of the "to language" vocabulary to create and use.
+      tokenizer: a function to use to tokenize each data sentence;
+        if None, basic_tokenizer will be used.
+
+    Returns:
+      A tuple of 6 elements:
+        (1) path to the token-ids for "from language" training data-set,
+        (2) path to the token-ids for "to language" training data-set,
+        (3) path to the token-ids for "from language" development data-set,
+        (4) path to the token-ids for "to language" development data-set,
+        (5) path to the "from language" vocabulary file,
+        (6) path to the "to language" vocabulary file.
+  """
+  from_vocab_path_a = os.path.join(data_dir, "vocab.enc_a")
+  to_vocab_path = os.path.join(data_dir, "vocab.dec")
+  from_vocab_path_b = os.path.join(data_dir, "vocab.enc_b")
+
+  if combined_vocabulary:
+    create_combined_vocabulary(from_vocab_path_a,
+                               [from_train_path, to_train_path],
+                               from_vocabulary_size,
+                               tokenizer,
+                               force=force)
+    create_combined_vocabulary(to_vocab_path,
+                               [from_train_path, to_train_path],
+                               to_vocabulary_size,
+                               tokenizer,
+                               force=force)
+  else:
+    create_vocabulary(from_vocab_path_a,
+                      from_train_path,
+                      from_vocabulary_size,
+                      tokenizer,
+                      force=force)
+    create_vocabulary(to_vocab_path,
+                      to_train_path,
+                      to_vocabulary_size,
+                      tokenizer,
+                      force=force)
+
+  # a vocabulary of POS tags for encoder B
+  from_train_pos_path = from_train_path + '.pos'
+  pos_tag(from_train_path, from_train_pos_path)
+  create_vocabulary(from_vocab_path_b,
+                    from_train_path,
+                    from_vocabulary_size,
+                    tokenizer,
+                    force=force)
+
+  from_train_ids_path_a, to_train_ids_path = make_dataset(from_train_path,
+                                                          to_train_path,
+                                                          from_vocab_path_a,
+                                                          to_vocab_path,
+                                                          tokenizer=None,
+                                                          force=force)
+  from_train_ids_path_b = from_train_path + ".ids.enc_b"
+  data_to_token_ids(from_train_path,
+                    from_train_ids_path_b,
+                    from_vocab_path_b,
+                    tokenizer,
+                    force=force)
+  from_dev_ids_path_a, to_dev_ids_path = make_dataset(from_dev_path,
+                                                      to_dev_path,
+                                                      from_vocab_path_a,
+                                                      to_vocab_path,
+                                                      tokenizer=None,
+                                                      force=force)
+  from_dev_ids_path_b = from_dev_path + ".ids.enc_b"
+  data_to_token_ids(from_dev_path,
+                    from_dev_ids_path_b,
+                    from_vocab_path_b,
+                    tokenizer,
+                    force=force)
+  from_test_ids_path_a, to_test_ids_path = make_dataset(from_test_path,
+                                                        to_test_path,
+                                                        from_vocab_path_a,
+                                                        to_vocab_path,
+                                                        tokenizer=None,
+                                                        force=force)
+  from_test_ids_path_b = from_test_path + ".ids.enc_b"
+  data_to_token_ids(from_test_path,
+                    from_test_ids_path_b,
+                    from_vocab_path_b,
+                    tokenizer,
+                    force=force)
+  train_data = (from_train_ids_path_a, from_train_ids_path_b, to_train_ids_path)
+  dev_data = (from_dev_ids_path_a, from_dev_ids_path_b, to_dev_ids_path)
+  test_data = (from_test_ids_path_a, from_test_ids_path_b, to_test_ids_path)
+  return (train_data, dev_data, test_data, from_vocab_path_a, from_vocab_path_b, to_vocab_path)
+

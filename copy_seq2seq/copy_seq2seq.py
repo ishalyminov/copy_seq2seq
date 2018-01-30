@@ -156,7 +156,7 @@ def dereference_copy_pointers(logit, encoder_inputs, vocabulary_size):
   return result
 
 
-def augment_logit_probability(in_logit_batch, in_attention_batch, in_encoder_inputs, in_inputs_mask):
+def augment_logit_probability(in_logit_batch, in_attention_batch, in_inputs_mask):
   batch_size, vocabulary_size = array_ops.shape(in_logit_batch)[0], array_ops.shape(in_logit_batch)[1]
   encoder_input_size = array_ops.shape(in_attention_batch)[1]
   attention_flattened = tf.multiply(tf.ones((batch_size * encoder_input_size, vocabulary_size)),
@@ -181,7 +181,7 @@ def calculate_copy_augmented_output_probabilities(logits, attentions, encoder_in
       softmax_attentions.append(tf.slice(combined_softmax, (0, vocabulary_size), (batch_size, encoder_input_size)))
 
     one_hot_mask = tf.one_hot(encoder_inputs, vocabulary_size)
-    logits_augmented = [augment_logit_probability(logit, attention, encoder_inputs, one_hot_mask)
+    logits_augmented = [augment_logit_probability(logit, attention, one_hot_mask)
                         for logit, attention in zip(softmax_logits, softmax_attentions)]
     return logits_augmented
 
@@ -296,8 +296,8 @@ def attention_decoder(decoder_inputs,
   if num_heads < 1:
     raise ValueError("With less than 1 heads, use a non-attention decoder.")
   if attention_states.get_shape()[2].value is None:
-    raise ValueError("Shape[2] of attention_states must be known: %s" %
-                     attention_states.get_shape())
+    raise ValueError("Shape[2] of attention_states must be known: %s"
+                     % attention_states.get_shape())
   if output_size is None:
     output_size = cell.output_size
 
@@ -824,8 +824,8 @@ def sequence_copy_loss_by_example(logits,
     ValueError: If len(logits) is different from len(targets) or len(weights).
   """
   if len(targets) != len(logits) or len(weights) != len(logits):
-    raise ValueError("Lengths of logits, weights, and targets must be the same %d, %d, %d." %
-                     (len(logits), len(weights), len(targets)))
+    raise ValueError("Lengths of logits, weights, and targets must be the same %d, %d, %d."
+                     % (len(logits), len(weights), len(targets)))
 
   copy_augmented_probs = calculate_copy_augmented_output_probabilities(logits,
                                                                        attentions,
