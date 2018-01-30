@@ -433,9 +433,9 @@ def prepare_dual_encoder_data(data_dir,
 
   # a vocabulary of POS tags for encoder B
   from_train_pos_path = from_train_path + '.pos'
-  pos_tag(from_train_path, from_train_pos_path)
+  pos_tag_data(from_train_path, from_train_pos_path)
   create_vocabulary(from_vocab_path_b,
-                    from_train_path,
+                    from_train_pos_path,
                     from_vocabulary_size,
                     tokenizer,
                     force=force)
@@ -447,7 +447,7 @@ def prepare_dual_encoder_data(data_dir,
                                                           tokenizer=None,
                                                           force=force)
   from_train_ids_path_b = from_train_path + ".ids.enc_b"
-  data_to_token_ids(from_train_path,
+  data_to_token_ids(from_train_pos_path,
                     from_train_ids_path_b,
                     from_vocab_path_b,
                     tokenizer,
@@ -458,8 +458,10 @@ def prepare_dual_encoder_data(data_dir,
                                                       to_vocab_path,
                                                       tokenizer=None,
                                                       force=force)
+  from_dev_pos_path = from_dev_path + '.pos'
+  pos_tag_data(from_dev_path, from_dev_pos_path)
   from_dev_ids_path_b = from_dev_path + ".ids.enc_b"
-  data_to_token_ids(from_dev_path,
+  data_to_token_ids(from_dev_pos_path,
                     from_dev_ids_path_b,
                     from_vocab_path_b,
                     tokenizer,
@@ -470,8 +472,10 @@ def prepare_dual_encoder_data(data_dir,
                                                         to_vocab_path,
                                                         tokenizer=None,
                                                         force=force)
+  from_test_pos_path = from_test_path + '.pos'
+  pos_tag_data(from_test_path, from_test_pos_path)
   from_test_ids_path_b = from_test_path + ".ids.enc_b"
-  data_to_token_ids(from_test_path,
+  data_to_token_ids(from_test_pos_path,
                     from_test_ids_path_b,
                     from_vocab_path_b,
                     tokenizer,
