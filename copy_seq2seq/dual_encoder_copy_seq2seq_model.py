@@ -233,17 +233,17 @@ class DualEncoderCopySeq2SeqModel(object):
     # Check if the sizes match.
     encoder_size, decoder_size = self.buckets[bucket_id]
     if len(encoder_a_inputs) != encoder_size:
-      raise ValueError("Encoder length must be equal to the one in bucket,"
-                       " %d != %d." % (len(encoder_a_inputs), encoder_size))
+      raise ValueError("Encoder length must be equal to the one in bucket, %d != %d."
+                       % (len(encoder_a_inputs), encoder_size))
     if len(encoder_b_inputs) != encoder_size:
-      raise ValueError("Encoder length must be equal to the one in bucket,"
-                       " %d != %d." % (len(encoder_b_inputs), encoder_size))
+      raise ValueError("Encoder length must be equal to the one in bucket, %d != %d."
+                       % (len(encoder_b_inputs), encoder_size))
     if len(decoder_inputs) != decoder_size:
-      raise ValueError("Decoder length must be equal to the one in bucket,"
-                       " %d != %d." % (len(decoder_inputs), decoder_size))
+      raise ValueError("Decoder length must be equal to the one in bucket, %d != %d."
+                       % (len(decoder_inputs), decoder_size))
     if len(target_weights) != decoder_size:
-      raise ValueError("Weights length must be equal to the one in bucket,"
-                       " %d != %d." % (len(target_weights), decoder_size))
+      raise ValueError("Weights length must be equal to the one in bucket, %d != %d."
+                       % (len(target_weights), decoder_size))
 
     # Input feed: encoder inputs, decoder inputs, target_weights, as provided.
     input_feed = {}
@@ -271,7 +271,7 @@ class DualEncoderCopySeq2SeqModel(object):
     else:
       return None, outputs[0], outputs[1:]  # No gradient norm, loss, outputs.
 
-  def get_batch(self, data, bucket_id, start_index=None):
+  def get_batch(self, data, bucket_id, start_index=None, word_dropout_prob=0.0):
     """Get a random batch of data from the specified bucket, prepare for step.
 
     To feed data in step(..) it must be a list of batch-major vectors, while
@@ -302,6 +302,9 @@ class DualEncoderCopySeq2SeqModel(object):
     # pad them if needed, reverse encoder inputs and add GO to decoder.
     for sample_index in sample_indices:
       encoder_a_input, encoder_b_input, decoder_input = data[bucket_id][sample_index]
+      encoder_a_input = [np.random.choice([data_utils.UNK_ID, token],
+                                          p=[word_dropout_prob, 1.0 - word_dropout_prob])
+                         for token in encoder_a_input]
       # Encoder inputs are padded and then reversed.
       encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_a_input))
       encoder_a_inputs.append(encoder_a_input + encoder_pad)
