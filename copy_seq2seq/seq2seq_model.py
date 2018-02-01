@@ -259,7 +259,7 @@ class Seq2SeqModel(object):
     else:
       return None, outputs[0], outputs[1:]  # No gradient norm, loss, outputs.
 
-  def get_batch(self, data, bucket_id, start_index=None):
+  def get_batch(self, data, bucket_id, start_index=None, word_dropout_prob=0.0):
     """Get a random batch of data from the specified bucket, prepare for step.
 
     To feed data in step(..) it must be a list of batch-major vectors, while
@@ -290,7 +290,10 @@ class Seq2SeqModel(object):
     # pad them if needed, reverse encoder inputs and add GO to decoder.
     for sample_index in sample_indices:
       encoder_input, decoder_input = data[bucket_id][sample_index]
-      # Encoder inputs are padded and then reversed.
+      encoder_input = [np.random.choice([data_utils.UNK_ID, token],
+                                        p=[word_dropout_prob, 1.0 - word_dropout_prob])
+                       for token in encoder_input]
+      # Encoder inputs are padded and
       encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
       encoder_inputs.append(encoder_input + encoder_pad)
 
